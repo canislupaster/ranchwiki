@@ -26,6 +26,17 @@
             "cwd": "${workspaceFolder}",
 
             "preLaunchTask": "make: headergen"
+        },
+        {
+            "name": "launch: headergen on corecommon",
+            "type": "lldb",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/corecommon/headergen",
+            "args": ["./corecommon/src/threads.c", "--pub"],
+
+            "cwd": "${workspaceFolder}",
+
+            "preLaunchTask": "make: headergen"
         }
     ]
 }

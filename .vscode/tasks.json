@@ -20,6 +20,12 @@
             "type": "shell",
             "command": "make -C build headergen",
             "dependsOn": "cmake"
+        },
+        {
+            "label": "makeheaders on corecommon",
+            "type": "shell",
+            "command": "./build/corecommon/headergen ./corecommon/src --pub",
+            "dependsOn": "make: headergen"
         }
     ]
 }

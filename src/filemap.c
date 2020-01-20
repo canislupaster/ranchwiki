@@ -3,10 +3,15 @@
 #include <string.h>
 
 #include "util.h"
+#include "vector.h"
+#include "rwlock.h"
+
+#include "threads.h"
 #include "siphash.h"
 
 #define LOAD_FACTOR 0.5
 #define RESIZE_SLOTS 3
+#define MUTEXES 10
 
 // probe hashmap with an index and data
 typedef struct {
@@ -19,6 +24,9 @@ typedef struct {
 
   uint64_t length;
   uint64_t slots;
+
+  rwlock_t resize; //lock for resizes
+  mtx_t mutexes[MUTEXES]; //list of mutexes, indexed by the item hash. no need for probing or identification, this is a lossy map for temporary synchronization
 } filemap_t;
 
 typedef struct {
@@ -49,10 +57,8 @@ void write_slots(filemap_t* filemap, unsigned int slots) {
 const size_t PREAMBLE = 2*4 + (8*2);
 
 int filemap_new(filemap_t* filemap, char* index, char* data) {
-  // filemap->index = fopen(index, "rb+");
-  // filemap->data = fopen(data, "rb+");
-  filemap->index = NULL;
-  filemap->data = NULL;
+  filemap->index = fopen(index, "rb+");
+  filemap->data = fopen(data, "rb+");
 
   if (!filemap->index && !filemap->data) {
     filemap->index = fopen(index, "wb");
@@ -91,6 +97,12 @@ int filemap_new(filemap_t* filemap, char* index, char* data) {
   fread(&filemap->slots, sizeof(uint64_t), 1, filemap->index);
   fread(&filemap->length, sizeof(uint64_t), 1, filemap->index);
 
+  for (int i=0; i<MUTEXES; i++) {
+    mtx_init(&filemap->mutexes[i], mtx_plain);
+  }
+
+  filemap->resize = rwlock_new();
+
   return 1;
 }
 
@@ -120,57 +132,62 @@ static uint64_t filemap_nondup_find(filemap_t* filemap, uint64_t hash) {
 //incremental resize
 //add another bucket(s), check first few buckets to see if it lies in this bucket
 void filemap_resize(filemap_t* filemap) {
-  while ((double)filemap->length/(double)filemap->slots > LOAD_FACTOR) {
-    fseek(filemap->index, 0, SEEK_END);
-
-    write_slots(filemap, RESIZE_SLOTS);
-    filemap->slots += RESIZE_SLOTS;
+  if ((double)filemap->length/(double)filemap->slots > LOAD_FACTOR) {
+    rwlock_write(&filemap->resize); //anticipate resize, other threads may grab it first
     
-    fseek(filemap->index, PREAMBLE, SEEK_SET);
+    //so we check again...
+    while ((double)filemap->length/(double)filemap->slots > LOAD_FACTOR) {
+      fseek(filemap->index, 0, SEEK_END);
 
-    for (int i=0; i < RESIZE_SLOTS; i++) {
-      uint64_t slot_pos = ftell(filemap->index);
-
-      uint64_t pos, key_size, val_size;
-      fread(&pos, 8, 1, filemap->index);
-
-      if (!pos) continue;
-
-      fseek(filemap->data, pos, SEEK_SET);
-      fread(&key_size, 8, 1, filemap->data);
-      fread(&val_size, 8, 1, filemap->data);
-
-      char key[key_size];
-      fread(key, key_size, 1, filemap->data);
-
-      uint64_t hash = do_hash(filemap, key, key_size);
+      write_slots(filemap, RESIZE_SLOTS);
+      filemap->slots += RESIZE_SLOTS;
       
-      if (hash % filemap->slots != i) {
-        uint64_t current = ftell(filemap->index);
-        
-        //seek back to pos, set to zero (since we are moving item)
-        fseek(filemap->index, slot_pos, SEEK_SET);
+      fseek(filemap->index, PREAMBLE, SEEK_SET);
 
-        uint64_t set_pos = 0;
-        fwrite(&set_pos, 8, 1, filemap->index);
+      for (int i=0; i < RESIZE_SLOTS; i++) {
+        uint64_t slot_pos = ftell(filemap->index);
+
+        uint64_t pos, key_size, val_size;
+        fread(&pos, 8, 1, filemap->index);
+
+        if (!pos) continue;
+
+        fseek(filemap->data, pos, SEEK_SET);
+        fread(&key_size, 8, 1, filemap->data);
+        fread(&val_size, 8, 1, filemap->data);
+
+        char key[key_size];
+        fread(key, key_size, 1, filemap->data);
+
+        uint64_t hash = do_hash(filemap, key, key_size);
         
-        uint64_t new_index = filemap_nondup_find(filemap, hash);
-        //write old position to new index
-        fseek(filemap->index, new_index, SEEK_SET);
-        fwrite(&pos, 8, 1, filemap->index);
-        
-        //seek back to current
-        fseek(filemap->index, current, SEEK_SET);
+        if (hash % filemap->slots != i) {
+          uint64_t current = ftell(filemap->index);
+          
+          //seek back to pos, set to zero (since we are moving item)
+          fseek(filemap->index, slot_pos, SEEK_SET);
+
+          uint64_t set_pos = 0;
+          fwrite(&set_pos, 8, 1, filemap->index);
+          
+          uint64_t new_index = filemap_nondup_find(filemap, hash);
+          //write old position to new index
+          fseek(filemap->index, new_index, SEEK_SET);
+          fwrite(&pos, 8, 1, filemap->index);
+          
+          //seek back to current
+          fseek(filemap->index, current, SEEK_SET);
+        }
       }
     }
+
+    rwlock_unwrite(&filemap->resize);
   }
 }
 
-static filemap_result filemap_find(filemap_t* filemap, char* key, uint64_t key_size) {
+static filemap_result filemap_find(filemap_t* filemap, uint64_t hash, char* key, uint64_t key_size) {
   filemap_result res;
   res.exists = 0;
-
-  uint64_t hash = do_hash(filemap, key, key_size);
 
   long probes = 0;
 
@@ -280,11 +297,24 @@ uint64_t get_free(filemap_t* filemap, uint64_t data_size) {
   return ftell(filemap->data);
 }
 
+void filemap_lock(filemap_t* filemap, uint64_t hash) {
+  rwlock_read(&filemap->resize);
+  mtx_lock(&filemap->mutexes[hash % MUTEXES]);
+}
+
+void filemap_unlock(filemap_t* filemap, uint64_t hash) {
+  rwlock_unread(&filemap->resize);
+  mtx_unlock(&filemap->mutexes[hash % MUTEXES]);
+}
+
 // returns zero if already exists
 int filemap_insert(filemap_t* filemap, char* key, char* value, uint64_t key_size, uint64_t val_size) {
   filemap_resize(filemap);
+
+  uint64_t hash = do_hash(filemap, key, key_size);
+  filemap_lock(filemap, hash);
   
-  filemap_result res = filemap_find(filemap, key, key_size);
+  filemap_result res = filemap_find(filemap, hash, key, key_size);
 
   if (!res.exists) {
     res.data_pos = get_free(filemap, key_size + val_size);
@@ -310,13 +340,24 @@ int filemap_insert(filemap_t* filemap, char* key, char* value, uint64_t key_size
     fwrite(value, val_size, 1, filemap->data); //write value
   }
 
-  if (!res.exists) filemap->length++;
+  filemap_unlock(filemap, hash);
+
+  if (!res.exists) {
+    rwlock_write(&filemap->resize);
+    
+    filemap->length++;
+
+    rwlock_unwrite(&filemap->resize);
+  }
 
   return res.exists;
 }
 
 filemap_mem_result filemap_findcpy(filemap_t* filemap, char* key, uint64_t key_size) {  
-  filemap_result res = filemap_find(filemap, key, key_size);
+  uint64_t hash = do_hash(filemap, key, key_size);
+  filemap_lock(filemap, hash);
+
+  filemap_result res = filemap_find(filemap, hash, key, key_size);
 
   if (res.exists) {
     char* data = malloc(res.data_size);
@@ -325,10 +366,15 @@ filemap_mem_result filemap_findcpy(filemap_t* filemap, char* key, uint64_t key_s
   } else {
     return (filemap_mem_result){.exists=0};
   }
+
+  filemap_unlock(filemap, hash);
 }
 
 int filemap_remove(filemap_t* filemap, char* key, uint64_t key_size) {
-  filemap_result res = filemap_find(filemap, key, key_size);
+  uint64_t hash = do_hash(filemap, key, key_size);
+  filemap_lock(filemap, hash);
+  
+  filemap_result res = filemap_find(filemap, hash, key, key_size);
 
   if (res.exists) {
     if (freelist_insert(filemap, filemap->free, res.data_pos, res.data_size + key_size)) {
@@ -339,7 +385,17 @@ int filemap_remove(filemap_t* filemap, char* key, uint64_t key_size) {
     fseek(filemap->index, res.index, SEEK_SET);
     uint64_t setptr = 0;
     fwrite(&setptr, 8, 1, filemap->index);
+
+    filemap_unlock(filemap, hash);
+
+    rwlock_write(&filemap->resize);
+    
+    filemap->length--;
+
+    rwlock_unwrite(&filemap->resize);
   } else {
+
+    filemap_unlock(filemap, hash);
     return 0;
   }
 }
