@@ -13,7 +13,10 @@
             "label": "make: wikithing",
             "type": "shell",
             "command": "make -C build wikithing",
-            "dependsOn": "cmake"
+            "dependsOn": "headergen on wikithing",
+            "problemMatcher": [
+                "$gcc"
+            ]
         },
         {
             "label": "make: headergen",
@@ -22,10 +25,17 @@
             "dependsOn": "cmake"
         },
         {
-            "label": "makeheaders on corecommon",
+            "label": "headergen on corecommon",
             "type": "shell",
             "command": "./build/corecommon/headergen ./corecommon/src --pub",
             "dependsOn": "make: headergen"
+        },
+        {
+            "label": "headergen on wikithing",
+            "type": "shell",
+            "command": "./build/corecommon/headergen ./src",
+            "dependsOn": "make: headergen",
+            "problemMatcher": []
         }
     ]
 }

@@ -4,8 +4,11 @@
 #include "vector.h"
 
 const char* ERROR_TEMPLATE = "error"; //name of error template
+#define CONTENT_MAX 500
 
 typedef enum {GET, POST} method_t;
+
+typedef enum {url_formdata} content_type;
 
 typedef char* query[2];
 typedef char* header[2];
@@ -17,11 +20,21 @@ typedef struct {
   vector_t query; //vector of char* [2]
 
   map_t headers; //char* -> char*
+
+  unsigned long content_length;
+  content_type ctype;
+  char* content;
 } request;
+
+typedef struct {
+  char* mime;
+  char* content;
+} resource;
 
 typedef struct {
   struct event_base *evbase;
   map_t templates;
+  map_t resources; //without slashes
 } ctx_t;
 
 typedef struct {
@@ -30,8 +43,11 @@ typedef struct {
   char *client_addr;
   
   struct {
-    int done; //uninitialized req
-    int req_parsed;
+    char done; //uninitialized req
+    char req_parsed; //request line parsed
+
+    char has_content;
+    char content_parsing; //set after first newline
     request req;
   } parser;
 

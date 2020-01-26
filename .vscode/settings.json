@@ -58,6 +58,21 @@
         "type_traits": "c",
         "__string": "c",
         "threads.h": "c",
-        "rwlock.h": "c"
-    }
+        "rwlock.h": "c",
+        "siphash.h": "c",
+        "time.h": "c",
+        "mutex": "c",
+        "typeinfo": "c",
+        "filemap.h": "c",
+        "__config": "c",
+        "exception": "c",
+        "optional": "c",
+        "cmath": "c",
+        "wiki.h": "c",
+        "complex": "c",
+        "numeric": "c",
+        "buffer.h": "c"
+    },
+    "discord.enabled": true,
+    "C_Cpp.errorSquiggles": "Enabled"
 }

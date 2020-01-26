@@ -21,7 +21,7 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/build/corecommon/headergen",
-            "args": ["./src"],
+            "args": ["./src/router.c", "./src/web.c"],
 
             "cwd": "${workspaceFolder}",
 
@@ -32,7 +32,7 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceFolder}/build/corecommon/headergen",
-            "args": ["./corecommon/src/threads.c", "--pub"],
+            "args": ["./corecommon/src/vector.c", "--pub"],
 
             "cwd": "${workspaceFolder}",
 

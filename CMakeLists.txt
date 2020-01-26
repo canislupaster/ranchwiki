@@ -6,10 +6,16 @@ add_subdirectory(corecommon)
 
 include_directories(./include ./corecommon/src)
 
-file(GLOB SRC ./src/*.h ./src/*.c)
+file(GLOB SRC ./src/*.c)
 
 add_executable(wikithing ${SRC})
 add_dependencies(wikithing corecommon)
+
+if(MSVC)
+  target_compile_options(wikithing PRIVATE /W4 /WX)
+else()
+  target_compile_options(wikithing PRIVATE -Wall -Wextra -pedantic -Wno-newline-eof -Wno-unused-parameter)
+endif()
 
 include_directories(/usr/local/include)
 find_library(LIBEVENT libevent.a)
