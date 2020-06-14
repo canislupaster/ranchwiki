@@ -39,4 +39,4 @@ _deps
 
 ./build
 ./xcode-build
-./.clangd
+.clangd
