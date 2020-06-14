@@ -44,7 +44,7 @@ session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen
                        NI_NUMERICHOST);
 
   if (rv != 0) {
-    session->client_addr = strdup("(unknown)");
+    return NULL;
   } else {
     session->client_addr = strdup(host);
   }
@@ -74,6 +74,10 @@ void req_free(request* req) {
     drop(*(char**)header_iter.key);
     drop(*(char**)header_iter.x);
   }
+
+  vector_free(&req->query);
+	vector_free(&req->path);
+	map_free(&req->headers);
 }
 
 void terminate(session_t *session) {
@@ -81,6 +85,11 @@ void terminate(session_t *session) {
   while (vector_next(&req_iter)) {
     req_free(req_iter.x);
   }
+
+	if (!session->parser.done) {
+		if (session->parser.multipart_boundary)
+			drop(session->parser.multipart_boundary);
+	}
 
   if (!session->parser.done && session->parser.req_parsed) {
     req_free(&session->parser.req);
@@ -92,7 +101,7 @@ void terminate(session_t *session) {
   drop(session);
 }
 
-void respond(session_t* session, int stat, char* content, header* headers, int headers_len) {
+void respond(session_t* session, int stat, char* content, unsigned long len, header* headers, int headers_len) {
   struct evbuffer* evbuf = bufferevent_get_output(session->bev);
   evbuffer_add_printf(evbuf, "HTTP/1.1 %i %s\r\n", stat, reason(stat));
 
@@ -107,19 +116,320 @@ void respond(session_t* session, int stat, char* content, header* headers, int h
   evbuffer_add_printf(evbuf, "\r\n");
 
   if (content) {
-    evbuffer_add(evbuf, content, strlen(content));
+    evbuffer_add(evbuf, content, len);
   }
 }
 
+void respond_redirect(session_t* session, char* url) {
+	respond(session, 302, "", 0, (header[1]){{"Location", url}}, 1);
+}
+
 void respond_html(session_t* session, int stat, char* content) {
-  respond(session, stat, content, (header[1]){{"Content-Type", "text/html; charset=UTF-8"}}, 1);
+  respond(session, stat, content, strlen(content), (header[1]){{"Content-Type", "text/html; charset=UTF-8"}}, 1);
+}
+
+void escape_html(char** str) {
+	vector_t vec = vector_from_string(*str);
+	vector_iterator iter = vector_iterate(&vec);
+	while (vector_next(&iter)) {
+		char* escaped;
+
+		switch (*(char*)iter.x) {
+			case '<': escaped="&lt;"; break;
+			case '>': escaped="&gt;"; break;
+			case '&': escaped="&amp;"; break;
+			case '"': escaped="&quot;"; break;
+			case '\'': escaped="&#39;"; break;
+			default: escaped=NULL;
+		}
+
+		if (escaped) {
+			vector_remove(&vec, iter.i-1);
+			vector_insert_manycpy(&vec, iter.i-1, strlen(escaped), escaped);
+			iter.i += strlen(escaped);
+		}
+	}
+
+	*str = vec.data;
+}
+
+typedef struct {
+	char* str;
+	unsigned long skip; //if a condition, length, including !%
+	unsigned long max_args; //required arguments
+	unsigned long max_cond;
+  unsigned long max_loop;
+	vector_t substitutions;
+} template_t;
+
+typedef struct {
+	unsigned long idx;
+	unsigned long offset;
+
+	template_t* insertion;
+	char inverted; //inverted condition
+  char loop;
+} substitution_t;
+
+typedef struct {
+  int* cond_args;
+  vector_t** loop_args;
+  char** sub_args;
+} template_args;
+
+template_t template_new(char* data) {
+	template_t template;
+	
+	//use same cursor method as used in percent parsing
+	unsigned long template_len = strlen(data)+1;
+	template.str = heap(template_len);
+	memset(template.str, 0, template_len);
+
+	template.skip = 0;
+	template.max_args = 0;
+	template.max_cond = 0;
+	template.max_loop = 0;
+
+	template.substitutions = vector_new(sizeof(substitution_t));
+
+	char* write_cursor = template.str;
+	char* read_cursor = data;
+
+	while (*read_cursor) {
+		if (strncmp(read_cursor, "!%", 2)==0) {
+			if (read_cursor > data && *(read_cursor-1)=='!') {
+				read_cursor++;
+				*write_cursor = '%';
+			} else {
+				template.skip = (read_cursor+2)-data;
+				break;
+			}
+			
+		} else if (*read_cursor == '%') {
+			read_cursor++;
+
+			//escape
+			if (*read_cursor == '%') {
+				*write_cursor = '%';
+
+			//condition
+			} else if (*read_cursor == '!') {
+				read_cursor++;
+
+				substitution_t* cond = vector_push(&template.substitutions);
+				cond->offset = write_cursor-template.str;
+				
+				if (*read_cursor == '*') {
+          cond->loop = 1;
+          read_cursor++;
+        } else if (*read_cursor == '!') {
+					cond->inverted = 1;
+          cond->loop = 0;
+					read_cursor++;
+				} else {
+					cond->inverted = 0;
+          cond->loop = 0;
+				}
+
+				cond->idx = *read_cursor - '0';
+				if (cond->loop && cond->idx >= template.max_loop)
+          template.max_loop = cond->idx+1;
+				else if (cond->idx >= template.max_cond)
+          template.max_cond = cond->idx+1;
+
+				char* cond_start = ++read_cursor;
+				template_t insertion = template_new(cond_start);
+
+				if (insertion.max_args > template.max_args)
+					template.max_args = insertion.max_args;
+				
+				if (insertion.max_cond > template.max_cond)
+					template.max_cond = insertion.max_cond;
+
+				if (insertion.max_loop > template.max_loop)
+					template.max_loop = insertion.max_loop;
+
+				read_cursor += insertion.skip;
+
+				cond->insertion = heapcpy(sizeof(template_t), &insertion);
+				continue;
+				
+			//index subsitution
+			} else {
+				unsigned long idx = *read_cursor - '0';
+				if (idx >= template.max_args) template.max_args = idx+1;
+
+				vector_pushcpy(&template.substitutions, &(substitution_t){.idx=idx, .offset=write_cursor-template.str});
+
+				read_cursor++;
+				continue;
+			}
+		} else {
+			*write_cursor = *read_cursor;
+		}
+			
+		write_cursor++;
+		read_cursor++;
+	}
+
+	return template;
+}
+
+void template_length(template_t* template, unsigned long* len, template_args* args) {
+	*len += strlen(template->str);
+
+	vector_iterator iter = vector_iterate(&template->substitutions);
+	while (vector_next(&iter)) {
+		substitution_t* sub = iter.x;
+		if (sub->insertion) {
+      if (sub->loop) {
+        vector_iterator iter = vector_iterate(args->loop_args[sub->idx]);
+        while (vector_next(&iter))
+          template_length(sub->insertion, len, iter.x);
+
+        continue;
+      }
+
+			if (sub->inverted ^ !args->cond_args[sub->idx]) continue;
+			template_length(sub->insertion, len, args);
+		} else {
+			char* arg = args->sub_args[sub->idx];
+			while (*arg) {
+				switch (*arg) {
+					case '<': *len+=strlen("&lt;"); break;
+					case '>': *len+=strlen("&gt;"); break;
+					case '&': *len+=strlen("&amp;"); break;
+					case '\'': *len+=strlen("&#39;"); break;
+					case '"': *len+=strlen("&quot;"); break;
+					default: (*len)++;
+				}
+
+				arg++;
+			}
+		}
+	}
+}
+
+void template_substitute(template_t* template, char** out, template_args* args) {
+	char* template_ptr = template->str;
+
+	vector_iterator iter = vector_iterate(&template->substitutions);
+	while (vector_next(&iter)) {
+		substitution_t* sub = iter.x;
+
+		unsigned long sub_before = sub->offset - (template_ptr - template->str);
+		if (sub_before > 0) {
+			memcpy(*out, template_ptr, sub_before);
+			*out += sub_before;
+			template_ptr += sub_before;
+		}
+
+		if (sub->insertion) {
+      if (sub->loop) {
+        vector_iterator iter = vector_iterate(args->loop_args[sub->idx]);
+        while (vector_next(&iter)) {
+          template_args* args = iter.x;
+          template_substitute(sub->insertion, out, args);
+          
+          //convenience free
+          if (args->sub_args)
+            drop(args->sub_args);
+         }
+
+         vector_free(args->loop_args[sub->idx]);
+
+        continue;
+      }
+
+			if (sub->inverted ^ !args->cond_args[sub->idx]) continue;
+			template_substitute(sub->insertion, out, args);
+		} else {
+			char* arg = args->sub_args[sub->idx];
+
+			while (*arg) {
+				char* escaped;
+
+				switch (*arg) {
+					case '<': escaped="&lt;"; break;
+					case '>': escaped="&gt;"; break;
+					case '&': escaped="&amp;"; break;
+					case '"': escaped="&quot;"; break;
+					case '\'': escaped="&#39;"; break;
+					default: escaped=NULL;
+				}
+
+				if (escaped) {
+					memcpy(*out, escaped, strlen(escaped));
+					*out += strlen(escaped);
+				} else {
+				 **out = *arg;
+				 (*out)++;
+				}
+
+				arg++;
+			}
+		}
+	}
+
+	unsigned long rest = strlen(template->str) - (template_ptr-template->str);
+	memcpy(*out, template_ptr, rest);
+	*out += rest;
+}
+
+char* do_template(template_t* template, va_list args) {
+  //allocate arrays on stack, then reference
+	int cond_args[template->max_cond];
+	for (unsigned long i=0; i<template->max_cond; i++) {
+		cond_args[i] = va_arg(args, int);
+	}
+
+	vector_t* loop_args[template->max_loop];
+	for (unsigned long i=0; i<template->max_loop; i++) {
+		loop_args[i] = va_arg(args, vector_t*);
+	}
+
+	char* sub_args[template->max_args];
+	for (unsigned long i=0; i<template->max_args; i++) {
+		sub_args[i] = va_arg(args, char*);
+	}
+
+  template_args t_args = {.cond_args=cond_args, .loop_args=loop_args, .sub_args=sub_args};
+
+	unsigned long len = 0;
+	template_length(template, &len, &t_args);
+
+	char* out = heap(len+1);
+	char* out_ptr = out;
+	template_substitute(template, &out_ptr, &t_args);
+	out[len] = 0;
+
+	return out;
+}
+
+void respond_template(session_t* session, int stat, char* template_name, char* title, ...) {
+	va_list args;
+	
+	template_t* template = map_find(&session->ctx->templates, &template_name);
+
+	va_start(args, title);
+	
+	char* template_output = do_template(template, args);
+	
+	va_end(args);
+
+	char* escaped_title = heapcpystr(title);
+	escape_html(&escaped_title);
+
+	char* global_output = heapstr(session->ctx->global, escaped_title, template_output);
+
+  respond_html(session, stat, global_output);
+
+  drop(template_output);
+  drop(global_output);
 }
 
 void respond_error(session_t* session, int stat, char* err) {
-  char* template = map_find(&session->ctx->templates, &ERROR_TEMPLATE);
-  respond_html(session, stat, heapstr(template, err));
-  
-  terminate(session);
+  respond_template(session, stat, ERROR_TEMPLATE, err, err);
 }
 
 void skip(char** cur) {
@@ -128,6 +438,24 @@ void skip(char** cur) {
 
 void parse_ws(char** cur) {
   while (**cur == ' ') (*cur)++;
+}
+
+void skip_until(char** cur, char* delim) {
+  while (!strchr(delim, **cur) && **cur) (*cur)++;
+}
+
+void skip_while(char** cur, char* delim) {
+  while (strchr(delim, **cur) && **cur) (*cur)++;
+}
+
+int skip_newline(char** cur) {
+  if (**cur == '\r') skip(cur);
+  if (**cur == '\n') {
+    skip(cur);
+    return 1;
+  } else {
+    return 0;
+  }
 }
 
 char* parse_name(char** cur, char* delim) {
@@ -176,7 +504,7 @@ char hexchar(char hex) {
 
 //frees original string
 char* percent_decode(char* data) {
-  char buffer[strlen(data)+1]; //temporary buffer, at least as long as data
+  char buffer[strlen(data)+1]; //temporary buffer, at most as long as data
   memset(buffer, 0, strlen(data)+1);
 
   unsigned long cur=0; //write cursor
@@ -191,7 +519,6 @@ char* percent_decode(char* data) {
       char x = hexchar(*curdata) * 16;
       skip(&curdata);
       x += hexchar(*curdata);
-      skip(&curdata);
 
       buffer[cur] = x; cur++;
     } else {
@@ -216,6 +543,26 @@ void parse_querystring(char* line, vector_t* vec) {
     if (*line == ' ') break;
     skip(&line); //skip &
   }
+}
+
+vector_t query_find(vector_t* query, char** params, int num_params, int strict) {
+	vector_t res = vector_new(sizeof(char*));
+
+	if ((strict && query->length != num_params) || query->length > num_params)
+		return res;
+
+	vector_iterator iter = vector_iterate(query);
+	while (vector_next(&iter)) {
+		char** q = iter.x;
+
+		for (int i=0; i<num_params; i++) {
+			if (strcmp(q[0], params[i])==0) {
+				vector_setcpy(&res, i, &q[1]);
+			}
+		}
+	}
+
+	return res;
 }
 
 int request_parse(char* line, request* req) {
@@ -243,7 +590,7 @@ int request_parse(char* line, request* req) {
     if (*line == '/') line++;
 
     while (*line != ' ') {
-      if (strncmp(line, "../", sizeof("../"))) {
+      if (strncmp(line, "../", strlen("../"))==0) {
         if (!vector_pop(&req->path)) {
 
           vector_free(&req->path);
@@ -271,16 +618,124 @@ int request_parse(char* line, request* req) {
   return 1;
 }
 
+vector_t parse_header_value(char* val) {
+	vector_t vec = vector_new(sizeof(char*[2]));
+
+	vector_pushcpy(&vec, (char*[]){heapcpy(1, ""), parse_name(&val, ",;")});
+
+	while (*val && *val == ',') {
+		val++;
+		vector_pushcpy(&vec, (char*[]){heapcpy(1, ""), parse_name(&val, ",;")});
+	}
+
+	while (*val) {
+		if (*val==';') val++;
+
+		parse_ws(&val);
+
+		char* name = parse_name(&val, "=");
+
+		while (*val && (*val == '=' || *val == ',')) {
+			val++;
+			//skip quotes
+			if (*val=='"') {
+				vector_pushcpy(&vec, (char*[]){heapcpystr(name), parse_name(&val, "\"")});
+				if (*val=='"') val++;
+			}
+
+			vector_pushcpy(&vec, (char*[]){heapcpystr(name), parse_name(&val, ",;")});
+		}
+	}
+
+	return vec;
+}
+
+//drops the vector
+//if extensibility is needed, follow the pattern used for query extraction
+char* header_find_value(vector_t* val, char* key) {
+	vector_iterator iter = vector_iterate(val);
+
+	char* res = NULL;
+	while (vector_next(&iter)) {
+		char** assoc = iter.x;
+		if (strcmp(assoc[0], key)==0) {
+			res = assoc[1];
+		} else {
+			drop(assoc[1]);
+		}
+
+		drop(assoc[0]);
+	}
+
+	vector_free(val);
+
+	return res;
+}
+
 int parse_content(session_t* session, struct evbuffer* evbuf) {
   if (evbuffer_get_length(evbuf) >= session->parser.req.content_length) {
     if (evbuffer_remove(evbuf, session->parser.req.content, session->parser.req.content_length)==-1) {
-      respond_error(session, 500, "Buffer error"); return 0;
+      respond_error(session, 500, "Buffer error");
+      terminate(session);
+      return 0;
     }
     
     //handle supported formats
     if (session->parser.req.ctype == url_formdata) {
+			fprintf(stderr, "%s", session->parser.req.content);
       parse_querystring(session->parser.req.content, &session->parser.req.query);
-    }
+    } else if (session->parser.req.ctype == multipart_formdata) {
+			char* content = session->parser.req.content;
+
+			while (!skip_word(&content, session->parser.multipart_boundary) && *content) content++;
+			skip(&content); //skip newline
+			
+			while (*content) {
+				//parse preamble
+				char* disposition=NULL, *mime=NULL;
+				while (*content && !skip_newline(&content)) {
+					if (skip_word(&content, "Content-Type:")) {
+						parse_ws(&content);
+						if (!mime) mime = parse_name(&content, "\r\n");
+            skip_newline(&content);
+					} else if (skip_word(&content, "Content-Disposition:")) {
+						parse_ws(&content);
+						if (!disposition) disposition = parse_name(&content, "\r\n");
+            skip_newline(&content);
+					} else {
+						skip_until(&content, "\r\n");
+            skip_newline(&content);
+					}
+				}
+
+				if (!disposition || !mime) {
+					if (disposition) drop(disposition);
+					if (mime) drop(mime);
+
+					respond_error(session, 500, "No disposition or mime");
+					terminate(session);
+					return 0;
+				}
+
+				vector_t val = parse_header_value(disposition);
+				char* disposition_name = header_find_value(&val, "name");
+				drop(disposition);
+
+				skip(&content); //skip newline
+				
+				char* data_start = content;
+				while (strcmp(content, session->parser.multipart_boundary)!=0 && *content) content++;
+				
+				multipart_data data = {.name=disposition_name, .mime=mime,
+					.content=heapcpy((content-data_start), data_start), .len=content-data_start};
+				vector_pushcpy(&session->parser.req.files, &data);
+
+				if (*content) {
+					content += strlen(session->parser.multipart_boundary);
+					if (skip_word(&content, "--")) break;
+				}
+			}
+		}
 
     vector_pushcpy(&session->requests, &session->parser.req);
     session->parser.done = 1;
@@ -307,12 +762,15 @@ void readcb(struct bufferevent *bev, void* ctx) {
 
   //parse request lines
   while ((line = evbuffer_readln(evbuf, NULL, EVBUFFER_EOL_CRLF))) {
+    fprintf(stderr, "%s\n", line);
+
     //parse new request or finish old one
     if (session->parser.done) {
       session->parser.done = 0;
       session->parser.req_parsed = 0;
       session->parser.has_content = 0;
       session->parser.content_parsing = 0;
+			session->parser.multipart_boundary = NULL;
     }
     
     if (strlen(line) == 0 && session->parser.req_parsed) {
@@ -323,15 +781,30 @@ void readcb(struct bufferevent *bev, void* ctx) {
         const char* clength_name = "Content-Type";
         char** ctype = map_find(&session->parser.req.headers, &clength_name);
 
+				const char* multipart_name = "multipart/form-data";
+
         //handle supported formats
         if (ctype && strcmp(*ctype, "application/x-www-form-urlencoded")==0) {
           session->parser.req.ctype = url_formdata;
+				} else if (ctype && strncmp(*ctype, multipart_name, strlen(multipart_name))==0) {
+					session->parser.req.ctype = multipart_formdata;
 
-          session->parser.req.content = heap(session->parser.req.content_length + 1);
-          session->parser.req.content[session->parser.req.content_length] = 0;
+					vector_t ctype_val = parse_header_value(*ctype);
+					session->parser.multipart_boundary = header_find_value(&ctype_val, "boundary");
+
+					if (!session->parser.multipart_boundary) {
+						respond_error(session, 400, "no boundary provided with multipart request");
+						terminate(session);
+						return;
+					}
         } else {
-          respond_error(session, 400, "Unsupported body format"); return;
+          respond_error(session, 400, "unsupported body format");
+          terminate(session);
+          return;
         }
+
+				session->parser.req.content = heap(session->parser.req.content_length + 1);
+				session->parser.req.content[session->parser.req.content_length] = 0;
 
         session->parser.content_parsing = 1;
         
@@ -343,8 +816,10 @@ void readcb(struct bufferevent *bev, void* ctx) {
       if (request_parse(line, &session->parser.req)) {
         session->parser.req_parsed = 1;
       } else {
-        respond_error(session, 400, "Malformed request"); return;
-      }
+        respond_error(session, 400, "Malformed request");
+				terminate(session);
+				return;
+			}
     } else {
       char* cur = line; //copy line to use as cursor
       if (skip_word(&cur, "Content-Length:")) {
@@ -352,8 +827,10 @@ void readcb(struct bufferevent *bev, void* ctx) {
         session->parser.has_content = 1;
 
         if (session->parser.req.content_length > CONTENT_MAX) {
-          respond_error(session, 400, "Oversized content"); return;
-        }
+          respond_error(session, 400, "Oversized content");
+					terminate(session);
+					return;
+				}
       } else {
         char* name = parse_name(&cur, ":");
         skip(&cur);
@@ -364,15 +841,36 @@ void readcb(struct bufferevent *bev, void* ctx) {
       }
     }
 
-    fprintf(stderr, "%s\n", line);
-
     drop(line);
   }
 
   //respond to pending requests
   vector_iterator req_iter = vector_iterate(&session->requests);
   while (vector_next(&req_iter)) {
+		//initialize user session
+    char* key = strdup(session->client_addr);
+		map_insert_result session_res = map_insert(&session->ctx->user_sessions, &key);
+
+		if (!session_res.exists) {
+			*(user_session**)session_res.val = heap(sizeof(user_session));
+			session->user_ses = *(user_session**)session_res.val;
+
+      mtx_init(&session->user_ses->lock, mtx_plain);
+
+			atomic_store(&session->user_ses->last_get, 0);
+			atomic_store(&session->user_ses->last_lock, 0);
+			atomic_store(&session->user_ses->last_access, 0);
+
+			session->user_ses->user.exists = 0;
+		} else {
+			session->user_ses = *(user_session**)session_res.val;
+		}
+
     route(session, req_iter.x);
+
+		//store last access for session expiry
+		atomic_store(&session->user_ses->last_access, time(NULL));
+
     req_free(req_iter.x);
   }
 
@@ -393,10 +891,13 @@ void eventcb(struct bufferevent *bev, short events, void* ctx) {
   session_t *session = (session_t *)ctx;
   
   if (events & BEV_EVENT_EOF) {
+    printf("done");
     terminate(session);
   } else if (events & (BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT)) {
     respond_error(session, 408, "Timeout / socket error");
-  }
+		terminate(session);
+		return;
+	}
 }
 
 void acceptcb(struct evconnlistener *listener, int fd, struct sockaddr *addr,
@@ -406,6 +907,7 @@ void acceptcb(struct evconnlistener *listener, int fd, struct sockaddr *addr,
   session_t *session;
 
   session = create_session(ctx, fd, addr, addrlen);
+	if (!session) return;
 
   bufferevent_setcb(session->bev, readcb, NULL, eventcb, session);
 }

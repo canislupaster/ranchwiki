@@ -1,0 +1,3 @@
+CMake
+
+noremap <leader>o :make\|!cd ./wiki; ../build/wikithing ../templates 8080<CR>

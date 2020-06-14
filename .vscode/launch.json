@@ -6,11 +6,13 @@
     "configurations": [
         {
             "name": "launch: wikithing",
-            "type": "lldb",
+            "type": "cppdbg",
             "request": "launch",
+            "MIMode": "lldb",
             "program": "${workspaceFolder}/build/wikithing",
+            "externalConsole": false,
 
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/wiki",
 
             "args": ["${workspaceFolder}/templates", "8080"],
 
@@ -18,8 +20,9 @@
         },
         {
             "name": "launch: headergen on wikithing",
-            "type": "lldb",
+            "type": "cppdbg",
             "request": "launch",
+            "MIMode": "lldb",
             "program": "${workspaceFolder}/build/corecommon/headergen",
             "args": ["./src/router.c", "./src/web.c"],
 

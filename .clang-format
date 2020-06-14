@@ -1,0 +1,13 @@
+﻿---
+BasedOnStyle: Google
+AllowShortCaseLabelsOnASingleLine: 'true'
+AllowShortIfStatementsOnASingleLine: Always
+AllowShortLoopsOnASingleLine: 'true'
+ContinuationIndentWidth: '0'
+IndentCaseLabels: 'true'
+PointerAlignment: Left
+SpaceAfterCStyleCast: 'false'
+UseTab: Always
+DerivePointerAlignment: 'false'
+
+...

@@ -1,0 +1,31 @@
+{
+  "configurations": {
+    "headergen on wikithing": {
+      "adapter": "vscode-cpptools",
+      "configuration": {
+        "name": "headergen on wikithing",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceRoot}/build/corecommon/headergen",
+				"args": ["./src"],
+        "externalConsole": false,
+        "MIMode": "lldb",
+				"cwd": "${workspaceRoot}",
+				"stopAtEntry": true
+      }
+    },
+    "wikithing": {
+      "adapter": "vscode-cpptools",
+      "configuration": {
+        "name": "wikithing",
+        "type": "cppdbg",
+        "request": "launch",
+        "program": "${workspaceRoot}/build/wikithing",
+        "externalConsole": false,
+        "MIMode": "lldb",
+				"cwd": "${workspaceRoot}",
+				"stopAtEntry": true
+      }
+    }
+	}
+}

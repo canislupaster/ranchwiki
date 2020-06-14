@@ -71,7 +71,9 @@
         "wiki.h": "c",
         "complex": "c",
         "numeric": "c",
-        "buffer.h": "c"
+        "buffer.h": "c",
+        "locktable.h": "c",
+        "__mutex_base": "c"
     },
     "discord.enabled": true,
     "C_Cpp.errorSquiggles": "Enabled"

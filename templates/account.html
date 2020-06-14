@@ -1,0 +1,16 @@
+<h1>account</h1>
+%!0 error: %0 !%
+
+<h2>profile</h2>
+<form method="POST" action="/account" >
+    <label>username</label> <input type="text" name="username" value="%1" />
+    <label>email</label> <input type="text" name="email" value="%2" />
+    <label>bio</label> <textarea name="bio" >%3</textarea>
+    <input type="submit" />
+</form>
+
+<h2>change password</h2>
+<form method="POST" action="/password" >
+    <input type="text" name="password" >
+    <input type="submit" />
+</form>

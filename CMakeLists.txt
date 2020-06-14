@@ -4,20 +4,25 @@ project(wikithing)
 
 add_subdirectory(corecommon)
 
-include_directories(./include ./corecommon/src)
+include_directories(./include ./corecommon/src /usr/local/include)
 
-file(GLOB SRC ./src/*.c)
+file(GLOB SRC src/*.c)
+list(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c ${CMAKE_CURRENT_SOURCE_DIR}/src/util_main.c)
 
-add_executable(wikithing ${SRC})
-add_dependencies(wikithing corecommon)
+add_executable(wikithing ${SRC} src/main.c)
 
-if(MSVC)
-  target_compile_options(wikithing PRIVATE /W4 /WX)
-else()
-  target_compile_options(wikithing PRIVATE -Wall -Wextra -pedantic -Wno-newline-eof -Wno-unused-parameter)
-endif()
+add_custom_target(genheader_wikithing COMMAND ${CMAKE_CURRENT_BINARY_DIR}/corecommon/headergen ${CMAKE_SOURCE_DIR}/src)
+add_dependencies(genheader_wikithing headergen)
 
-include_directories(/usr/local/include)
+add_dependencies(wikithing genheader_wikithing corecommon)
+
 find_library(LIBEVENT libevent.a)
+find_library(LIBEVENT_PTHREADS libevent_pthreads.a)
 
-target_link_libraries(wikithing PUBLIC corecommon ${LIBEVENT})
+find_package(OPENSSL REQUIRED)
+
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
+
+target_link_libraries(wikithing PUBLIC corecommon ${LIBEVENT} ${LIBEVENT_PTHREADS} ${OPENSSL_CRYPTO_LIBRARY} Threads::Threads)
+target_include_directories(wikithing PUBLIC ${OPENSSL_INCLUDE_DIR})
