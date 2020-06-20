@@ -11,6 +11,7 @@
 
 #define LOAD_FACTOR \
   0.5  // RESIZE_SLOTS/LOAD_FACTOR must be greater than one, lest probes break
+#define SENTINEL 1
 #define RESIZE_SLOTS 1
 #define MUTEXES 10
 
@@ -126,6 +127,8 @@ filemap_t filemap_new(char* data, unsigned fields, int overwrite) {
 
     // initialize freelist
     fwrite(&filemap.free, 8, 1, filemap.data);
+		
+		fclose(filemap.data);
     filemap.data = freopen(data, "rb+", filemap.data);
   } else {
     fseek(filemap.data, 0, SEEK_SET);
@@ -173,6 +176,7 @@ filemap_index_t filemap_index_new(filemap_t* fmap, char* index, unsigned field,
 
     write_slots(&new_index, 2);	 // write slots afterwards
 
+		fclose(new_index.file);
     freopen(index, "rb+", new_index.file);
   } else {
     // read the seed (4 bytes x 4)
@@ -201,6 +205,8 @@ filemap_list_t filemap_list_new(char* list, int overwrite) {
     new_list.length = 0;
 
     fwrite(&new_list.length, 8, 1, new_list.file);
+		
+		fclose(new_list.file);
     freopen(list, "rb+", new_list.file);
   } else {
     fread(&new_list.length, 8, 1, new_list.file);
@@ -226,7 +232,7 @@ filemap_object filemap_index_obj(filemap_object* obj,
 				 filemap_partial_object* partial) {
 
   return (filemap_object){.data_pos = partial->index,
-			  .data_size = 8,
+			  .data_size = obj->data_size,
 			  .fields = obj->fields,
 			  .lengths = obj->lengths,
 			  .exists = obj->exists};
@@ -293,7 +299,8 @@ filemap_ordered_list_t filemap_ordered_list_new(char* order_list, int page_size,
 
     write_pages(&new_list, 0, UINT64_MAX, 0);
 
-    freopen(order_list, "rb+", new_list.file);
+		fclose(new_list.file);
+		freopen(order_list, "rb+", new_list.file);
   } else {
     fread(&new_list.pages, 8, 1, new_list.file);
     fread(&new_list.min, 8, 1, new_list.file);
@@ -334,8 +341,7 @@ static uint64_t skip_fields(filemap_t* filemap, uint64_t field) {
 // linear hashing
 // add another bucket(s)
 static void filemap_resize(filemap_index_t* index) {
-  while ((double)index->length / (double)(index->slots + index->resize_slots) >=
-	 LOAD_FACTOR) {
+  while ((double)index->length / (double)(index->slots + index->resize_slots) >= LOAD_FACTOR) {
     uint64_t lookup_overlap = index->resize_lookup_slots - index->resize_slots;
 
     if (lookup_overlap < RESIZE_SLOTS) {
@@ -363,14 +369,15 @@ static void filemap_resize(filemap_index_t* index) {
 
         if (!pos) break;
 
+				uint64_t data_pos = pos;
         if (index->data->alias) {
-          pos = filemap_list_value(index->data->alias, pos);
-          if (pos == 0) continue;
+          data_pos = filemap_list_value(index->data->alias, pos);
+          if (data_pos == 0) continue;
         }
 
         mtx_lock(&index->data->lock);
 
-        fseek(index->data->data, pos, SEEK_SET);
+        fseek(index->data->data, data_pos, SEEK_SET);
 
         uint64_t f_size = skip_fields(index->data, index->field);
 
@@ -385,8 +392,7 @@ static void filemap_resize(filemap_index_t* index) {
 
         hash = do_hash(index, field, f_size);
 
-        if (hash % (index->slots * 2) !=
-            i) {  // will either be i or slots-1+i (next modular multiple? of i)
+        if (hash % (index->slots * 2) != i) {  // will either be i or slots-1+i (next modular multiple of i)
           // seek back to pos, set to zero (since we are moving item)
           fseek(index->file, slot_pos, SEEK_SET);
 
@@ -399,14 +405,14 @@ static void filemap_resize(filemap_index_t* index) {
 
           while (new_pos != 0) {
             uint64_t slot =
-            hash + (uint64_t)((new_probes + new_probes * new_probes) / 2);
+              hash + (uint64_t)((new_probes + new_probes * new_probes) / 2);
+
             slot %= index->slots * 2;
 
             // add more lookup slots for probing
             // these are only for already-resized slots
             if (slot >= index->slots + index->resize_lookup_slots) {
-              uint64_t diff =
-              slot - index->slots + index->resize_lookup_slots - 1;
+              uint64_t diff = slot - index->slots + index->resize_lookup_slots - 1;
 
               fseek(index->file, 0, SEEK_END);
               write_slots(index, diff);
@@ -443,17 +449,15 @@ static void filemap_resize(filemap_index_t* index) {
 
 static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 						    uint64_t hash, char* key,
-						    uint64_t key_size) {
+						    uint64_t key_size, int insert) {
   filemap_partial_object obj;
   obj.exists = 0;
 
   long probes = 0;
 
   uint64_t slot2 = hash % (index->slots * 2);
-  char resizing =
-  slot2 >= index->slots &&
-  slot2 <
-  index->slots + index->resize_slots;  // whether it starts from a resizing slot
+  char resizing = slot2 >= index->slots &&
+    slot2 < index->slots + index->resize_slots;  // whether it starts from a resizing slot
 
   while (1) {
     uint64_t slot = (hash + (uint64_t)((probes + probes * probes) / 2)) %
@@ -469,6 +473,16 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
     obj.index = ftell(index->file);
     fread(&obj.data_pos, 8, 1, index->file);  // read pos from current slot
 
+		if (obj.data_pos == SENTINEL) {
+			if (insert) {
+				obj.data_pos = 0;
+				return obj;
+			}
+			
+			probes++;
+			continue;
+		}
+		
     if (obj.data_pos != 0) {
       uint64_t data_pos = obj.data_pos;
 
@@ -496,7 +510,7 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
       }
 
       mtx_unlock(&index->data->lock);
-    } else {
+		} else {
       break;
     }
 
@@ -511,8 +525,7 @@ filemap_partial_object filemap_find(filemap_index_t* index, char* key,
   uint64_t hash = do_hash(index, key, key_size);
 
   mtx_lock(&index->lock);
-  filemap_partial_object obj =
-  filemap_find_unlocked(index, hash, key, key_size);
+  filemap_partial_object obj = filemap_find_unlocked(index, hash, key, key_size, 0);
 
   mtx_unlock(&index->lock);
 
@@ -551,7 +564,7 @@ int freelist_insert(filemap_t* filemap, uint64_t freelist, uint64_t block,
   fwrite(&freelist, 8, 1, filemap->data);
 
   if (freelist_prev) {
-    fseek(filemap->data, freelist + 8, SEEK_SET);  // go to next
+    fseek(filemap->data, freelist_prev + 8, SEEK_SET);  // go to next
     fwrite(&block, 8, 1, filemap->data);
 
     mtx_unlock(&filemap->lock);
@@ -563,7 +576,7 @@ int freelist_insert(filemap_t* filemap, uint64_t freelist, uint64_t block,
 }
 
 // get a free block from freelist or end of data file
-// data_size does not include key or data lengths
+// data_size includes key or data lengths
 // locks data
 uint64_t get_free(filemap_t* filemap, uint64_t data_size) {
   mtx_lock(&filemap->lock);
@@ -598,9 +611,9 @@ uint64_t get_free(filemap_t* filemap, uint64_t data_size) {
       mtx_lock(&filemap->lock);
 
       if (res) {
-	filemap->free = block;
+        filemap->free = block;
       } else {
-	filemap->free = next;
+        filemap->free = next;
       }
 
       mtx_unlock(&filemap->lock);
@@ -646,10 +659,10 @@ filemap_object filemap_cpy(filemap_t* filemap, filemap_partial_object* res) {
     // read data
     for (unsigned i = 0; i < filemap->fields; i++) {
       if (obj.lengths[i] > 0) {
-	obj.fields[i] = heap(obj.lengths[i]);
-	fread(obj.fields[i], obj.lengths[i], 1, filemap->data);
+				obj.fields[i] = heap(obj.lengths[i]);
+				fread(obj.fields[i], obj.lengths[i], 1, filemap->data);
       } else {
-	obj.fields[i] = NULL;
+				obj.fields[i] = NULL;
       }
     }
 
@@ -666,6 +679,8 @@ filemap_object filemap_cpy(filemap_t* filemap, filemap_partial_object* res) {
 
 filemap_object filemap_cpyref(filemap_t* filemap, filemap_partial_object* obj) {
   if (filemap->alias) {
+		if (!obj->exists) return (filemap_object){.exists=0};
+		
     filemap_partial_object temp;
 
     temp.data_pos = filemap_list_value(filemap->alias, obj->data_pos);
@@ -689,13 +704,6 @@ filemap_field filemap_cpyfield(filemap_t* filemap,
 			       unsigned field) {
   if (!partial->exists) return (filemap_field){.exists = 0};
 
-  uint64_t data_pos = partial->data_pos;
-
-  if (filemap->alias) {
-    data_pos = filemap_list_value(filemap->alias, data_pos);
-    if (data_pos==0) return (filemap_field){.exists = 0};
-  }
-
   vector_t vec = vector_new(1);
 
   mtx_lock(&filemap->lock);
@@ -711,6 +719,22 @@ filemap_field filemap_cpyfield(filemap_t* filemap,
   return (filemap_field){.exists = 1, .val = vec};
 }
 
+filemap_field filemap_cpyfieldref(filemap_t* filemap, filemap_partial_object* partial, unsigned field) {
+  if (filemap->alias) {
+		if (!partial->exists) return (filemap_field){.exists=0};
+		
+    filemap_partial_object temp;
+    temp.data_pos = filemap_list_value(filemap->alias, partial->data_pos);
+    if (temp.data_pos == 0) return (filemap_field){.exists=0};
+
+    temp.exists = 1;
+
+    return filemap_cpyfield(filemap, &temp, field);
+  } else {
+    return filemap_cpyfield(filemap, partial, field);
+  }
+}
+
 // adds obj to index
 filemap_partial_object filemap_insert(filemap_index_t* index,
 				      filemap_object* obj) {
@@ -724,13 +748,12 @@ filemap_partial_object filemap_insert(filemap_index_t* index,
   filemap_resize(index);
 
   filemap_partial_object partial =
-  filemap_find_unlocked(index, hash, key, key_size);
+    filemap_find_unlocked(index, hash, key, key_size, 1);
 
   fseek(index->file, partial.index, SEEK_SET);
   fwrite(&obj->data_pos, 8, 1, index->file);  // write data_pos
 
-  partial.data_pos =
-  obj->data_pos;  //"file" leaks will occur if previous data is not removed
+  partial.data_pos = obj->data_pos;  //"file" leaks will occur if previous data is not removed
 
   if (!partial.exists) index->length++;
   partial.exists = 1;
@@ -740,20 +763,27 @@ filemap_partial_object filemap_insert(filemap_index_t* index,
   return partial;
 }
 
-void filemap_remove(filemap_index_t* index, filemap_partial_object* obj) {
-  //???
-  if (!obj->index) return;
-
+int filemap_remove(filemap_index_t* index, char* key, uint64_t key_size) {
+  uint64_t hash = do_hash(index, key, key_size);
+  
   mtx_lock(&index->lock);
+	
+	filemap_partial_object obj = filemap_find_unlocked(index, hash, key, key_size, 0);
+  if (!obj.index) {
+    mtx_unlock(&index->lock);
+    return 0;
+  }
 
   // set original index to zero to indicate slot is empty
-  fseek(index->file, obj->index, SEEK_SET);
-  uint64_t setptr = 0;
+  fseek(index->file, obj.index, SEEK_SET);
+  uint64_t setptr = SENTINEL;
   fwrite(&setptr, 8, 1, index->file);
 
   index->length--;
 
   mtx_unlock(&index->lock);
+
+  return 1;
 }
 
 filemap_iterator filemap_index_iterate(filemap_t* filemap,
@@ -853,7 +883,7 @@ uint64_t filemap_page_insert(filemap_ordered_list_t* list, uint64_t length,
   uint64_t order_pos[2];
   for (; i < length; i++) {
     // skip sentinels
-    while (order_pos[1] == 0) fread(&order_pos, 8 * 2, 1, list->file);
+		do fread(&order_pos, 8 * 2, 1, list->file); while (order_pos[1] == 0);
 
     if (order_pos[0] > item_order) {
       break;
@@ -1134,6 +1164,8 @@ void filemap_list_update(filemap_list_t* list, filemap_partial_object* partial,
   fwrite(&obj->data_pos, 8, 1, list->file);
 
   mtx_unlock(&list->lock);
+
+  partial->data_pos = obj->data_pos;
 }
 
 //wrappers to bypass deref
@@ -1165,7 +1197,7 @@ int filemap_next(filemap_iterator* iter) {
     iter->obj.index = ftell(iter->file);
     fread(&iter->obj.data_pos, 8, 1, iter->file);
 
-  } while (!iter->obj.data_pos && !feof(iter->file));
+	} while ((!iter->obj.data_pos || iter->obj.data_pos == SENTINEL) && !feof(iter->file));
 
   if (feof(iter->file)) {
     return 0;
@@ -1215,6 +1247,35 @@ filemap_object filemap_push(filemap_t* filemap, char** fields,
 
   obj.exists = 1;
   return obj;
+}
+
+typedef struct {
+  uint64_t field;
+  char* new;
+  uint64_t len;
+} update_t;
+
+filemap_object filemap_push_updated(filemap_t* filemap, filemap_object* base, update_t* updates, unsigned count) {
+  char** fields = heap(filemap->fields*8);
+  memcpy(fields, base->fields, filemap->fields*8);
+
+  uint64_t* lengths = heap(filemap->fields*8);
+  memcpy(lengths, base->lengths, filemap->fields*8);
+
+  for (unsigned i = 0; i < count; i++) {
+    update_t up = updates[i];
+    fields[up.field] = up.new;
+    lengths[up.field] = up.len;
+  }
+
+  return filemap_push(filemap, fields, lengths);
+}
+
+void filemap_push_field(filemap_object* obj, uint64_t field, uint64_t size, void* x) {
+  obj->fields[field] = resize(obj->fields[field], obj->lengths[field]+size);
+  memcpy(obj->fields[field] + obj->lengths[field], x, size);
+
+  obj->lengths[field] += size;
 }
 
 filemap_object filemap_findcpy(filemap_index_t* index, char* key,
@@ -1290,7 +1351,14 @@ void filemap_clean(filemap_t* filemap) {
   mtx_unlock(&filemap->lock);
 }
 
+void filemap_updated_free(filemap_t* fmap, filemap_object* obj) {
+	drop(obj->fields);
+  drop(obj->lengths);
+}
+
 void filemap_object_free(filemap_t* fmap, filemap_object* obj) {
+	if (!obj->exists) return;
+	
   for (unsigned i = 0; i < fmap->fields; i++) {
     drop(obj->fields[i]);
   }

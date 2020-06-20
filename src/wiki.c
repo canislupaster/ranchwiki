@@ -7,6 +7,7 @@
 #include "hashtable.h"
 
 #include "filemap.h"
+#include "context.h"
 
 #define DATA_PATH "./data/"
 
@@ -33,8 +34,9 @@ typedef struct {
 } text_t;
 
 void skipline(char** str) {
-  while (**str != '\n') (*str)++;
-  (*str)++;
+  while (**str != '\n' && **str != '\r' && **str) (*str)++;
+  if (**str) (*str)++;
+	if (**str=='\n') (*str)++;
 }
 
 size_t skipline_i(char* str) {
@@ -61,9 +63,12 @@ char* search_line(char* search, char* line) {
   return NULL;
 }
 
+//copies (obv...)
 int parse_wiki_path(char* path, vector_t* vec) {
-	char* segment = path;
 	int alphabetical = 0;
+
+  while (*path && *path=='/') path++;
+	char* segment = path;
 
 	while (*path) {
 		switch (*path) {
@@ -158,22 +163,40 @@ diff_t find_changes(char* from, char* to) {
 }
 
 void group_new(char* dirname) {
-  char* datapath = heapstr("%s%s", DATA_PATH, dirname);
-  mkdir(datapath, 0775);
-  drop(datapath);
+  mkdir(dirname, 0775);
+}
+
+vector_t make_path(vector_t* path) {
+  vector_t out_path = vector_new(1);
+  vector_stockstr(&out_path, DATA_PATH);
+
+  vector_iterator iter = vector_iterate(path);
+
+  while (vector_next(&iter)) {
+    char* segment = *(char**)iter.x;
+    vector_stockcpy(&out_path, strlen(segment), segment);
+
+    if (iter.i != path->length) {
+      vector_pushcpy(&out_path, "/");
+      vector_pushcpy(&out_path, "\0");
+
+      group_new(out_path.data);
+
+      vector_pop(&out_path);
+    }
+  }
+
+  vector_pushcpy(&out_path, "\0");
+  return out_path;
 }
 
 text_t txt_new(char* filename) {
   text_t txt;
 
-  char* datapath = heapstr("%s%s", DATA_PATH, filename);
-
-  txt.file = fopen(datapath, "rb+");
+  txt.file = fopen(filename, "rb+");
   if (!txt.file) {
-    txt.file = fopen(datapath, "wb+");
+    txt.file = fopen(filename, "wb+");
   }
-
-  drop(datapath);
 
   txt.diffs = vector_new(sizeof(diff_t));
   return txt;
@@ -297,20 +320,22 @@ void read_txt(text_t* txt, uint64_t max) {
   }
 }
 
+void diff_free(diff_t* d) {
+  vector_iterator add_iter = vector_iterate(&d->additions);
+  while (vector_next(&add_iter)) {
+    drop(((add_t*)add_iter.x)->txt);
+  }
+
+  vector_iterator del_iter = vector_iterate(&d->deletions);
+  while (vector_next(&del_iter)) {
+    drop(((del_t*)del_iter.x)->txt);
+  }
+}
+
 void txt_free(text_t* txt) {
   vector_iterator diff_iter = vector_iterate(&txt->diffs);
   while (vector_next(&diff_iter)) {
-    diff_t* d = diff_iter.x;
-
-    vector_iterator add_iter = vector_iterate(&d->additions);
-    while (vector_next(&add_iter)) {
-      drop(((add_t*)add_iter.x)->txt);
-    }
-
-		vector_iterator del_iter = vector_iterate(&d->deletions);
-		while (vector_next(&del_iter)) {
-			drop(((del_t*)del_iter.x)->txt);
-		}
+    diff_free(diff_iter.x);
 	}
 
 	drop(txt->current);

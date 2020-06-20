@@ -1,0 +1,21 @@
+<h1>edit article</h1>
+
+%!0
+
+%!1
+error: %0
+!%
+<form method="POST" action="/edit" enctype="application/x-www-form-urlencoded" >
+	old path: <input type="text" value="%1" name="old-path" />
+	<br/>
+	new path: <input type="text" value="%2" name="new-path" />
+	<br/>
+	<textarea name="content" >%3</textarea>
+  <br/>
+	<input type="submit" />
+</form>
+!%
+
+%!!0
+<p>You do not have permission to edit an article.</p>
+!%

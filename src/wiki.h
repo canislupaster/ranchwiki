@@ -1,11 +1,12 @@
 // Automatically generated header.
 
 #pragma once
-#include "stdio.h"
+#include "stdlib.h"
 #include <sys/stat.h>
 #include "vector.h"
-#include "stdlib.h"
 #include "hashtable.h"
+#include "stdio.h"
+#define DATA_PATH "./data/"
 typedef struct {
   uint64_t pos;
   char* txt;
@@ -25,8 +26,10 @@ typedef struct {
   vector_t diffs;
 } text_t;
 int parse_wiki_path(char* path, vector_t* vec);
-void group_new(char* dirname);
+diff_t find_changes(char* from, char* to);
+vector_t make_path(vector_t* path);
 text_t txt_new(char* filename);
 void add_diff(text_t* txt, diff_t* d, char* current_str);
 void read_txt(text_t* txt, uint64_t max);
+void diff_free(diff_t* d);
 void txt_free(text_t* txt);

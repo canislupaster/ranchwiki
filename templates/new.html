@@ -5,7 +5,7 @@
 %!1
 error: %0
 !%
-<form method="POST" enctype="application/x-www-form-urlencoded" >
+<form method="POST" action="/new" enctype="application/x-www-form-urlencoded" >
 	path: <input type="text" value="%1" name="path" />
 	<br/> <!--the site is supposed to look old-->
 	<textarea name="content" >%2</textarea>
@@ -13,8 +13,11 @@ error: %0
 	<input type="submit" />
 </form>
 
-<form method="POST" enctype="multipart/form-data" >
-	Upload supplement: <input type="file" accept="image/*" />
+<p>upload images:</p>
+<form method="POST" action="/upload" enctype="multipart/form-data" >
+	path: <input type="text" value="%1" name="path" />
+	<br/>
+	<input type="file" name="file" accept="image/*" />
 	<br/>
 	<input type="submit" />
 </form>

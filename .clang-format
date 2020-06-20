@@ -1,13 +1,16 @@
 ﻿---
-BasedOnStyle: Google
+BasedOnStyle: Chromium
+AlignTrailingComments: 'true'
+AllowShortBlocksOnASingleLine: 'true'
 AllowShortCaseLabelsOnASingleLine: 'true'
 AllowShortIfStatementsOnASingleLine: Always
 AllowShortLoopsOnASingleLine: 'true'
+ColumnLimit: '0'
 ContinuationIndentWidth: '0'
+DerivePointerAlignment: 'false'
 IndentCaseLabels: 'true'
 PointerAlignment: Left
 SpaceAfterCStyleCast: 'false'
 UseTab: Always
-DerivePointerAlignment: 'false'
 
 ...

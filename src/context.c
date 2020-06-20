@@ -13,9 +13,11 @@
 
 const char* ERROR_TEMPLATE = "error"; //name of error template
 const char* GLOBAL_TEMPLATE = "global"; //name of global template
-#define CONTENT_MAX 500
+#define CONTENT_MAX 50*1024*1024 //50 mb
 #define SESSION_TIMEOUT 3600*24*60 //60 days
 #define CLEANUP_INTERVAL 24*3600
+#define CACHE_EXPIRY 3600 //seconds after which to expire cache's weighting 
+#define CACHE_MIN 100 //accesses per hour to qualify in cache
 
 typedef enum {GET, POST} method_t;
 
@@ -63,6 +65,35 @@ typedef struct {
 	atomic_ulong last_lock;
 } user_session;
 
+typedef enum: uint64_t {
+  user_name_i = 0,
+  user_email_i,
+  user_data_i,
+  user_bio_i,
+  user_length_i
+} user_idx;
+
+// data, referenced by/items, path, contributors, html cache
+typedef enum: uint64_t {
+  article_data_i = 0,
+  article_items_i,
+  article_path_i,
+  article_contrib_i,
+  article_html_i,
+  article_length_i
+} article_idx;
+
+typedef struct {
+  atomic_ulong accessors;
+  atomic_ulong accesses;
+  time_t first_cache;
+
+  char delete;
+
+  char* data;
+  unsigned long len;
+} cached;
+
 typedef struct {
   struct event_base *evbase;
 
@@ -82,7 +113,6 @@ typedef struct {
 	filemap_list_t article_id;
 
 	filemap_index_t article_by_name;
-	filemap_index_t article_by_user;
 
 	filemap_ordered_list_t articles_alphabetical;
 	filemap_ordered_list_t articles_newest;
@@ -91,6 +121,8 @@ typedef struct {
 	map_t user_sessions_by_idx;
 
   map_t article_lock;
+
+  map_t cached; //maps to file name of cached portion
 } ctx_t;
 
 typedef struct {
@@ -113,6 +145,7 @@ typedef struct {
   } parser;
 
   vector_t requests;
+  int closed;
 } session_t;
 
 void cleanup_sessions(ctx_t* ctx) {
@@ -122,13 +155,88 @@ void cleanup_sessions(ctx_t* ctx) {
 	while (map_next(&iter)) {
 		user_session* user_ses = iter.x;
 		time_t last_access = atomic_load(&user_ses->last_access);
-		if (user_ses->last_access-t > SESSION_TIMEOUT) {
+		
+		if (difftime(last_access, t) > SESSION_TIMEOUT) {
       mtx_lock(&user_ses->lock);
       mtx_destroy(&user_ses->lock);
 
       map_next_delete(&iter);
      }
 	}
+}
+
+cached* ctx_cache_find(ctx_t* ctx, char* name) {
+  cached* cache = map_find(&ctx->cached, &name);
+   
+   if (cache && !cache->delete)
+    atomic_fetch_add(&cache->accessors, 1);
+
+  return cache;
+}
+
+cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len) {
+  cached new = {.data=data, .len=len, .delete=0};
+  new.first_cache = time(NULL);
+  atomic_init(&new.accesses, 0);
+  atomic_init(&new.accessors, 1);
+
+  return map_insertcpy(&ctx->cached, &name, &new).val;
+}
+
+void ctx_cache_done(ctx_t* ctx, cached* cache, char* name) {
+  time_t t = time(NULL);
+
+  unsigned long accs = atomic_fetch_add(&cache->accesses, 1)+1;
+
+  cache->delete = accs*3600/difftime(t, cache->first_cache) < CACHE_MIN;
+  unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
+
+  //small race...
+  if (acc == 0 && difftime(t, cache->first_cache) >= CACHE_EXPIRY) {
+    cache->len = t;
+    atomic_store(&cache->accesses, 1);
+
+  } else if (cache->delete && acc==0) {
+    drop(cache->data);
+    map_remove(&ctx->cached, &name);
+  }
+}
+
+void ctx_cache_remove(ctx_t* ctx, char* name) {
+  cached* cache = map_find(&ctx->cached, &name);
+  if (cache) {
+    atomic_fetch_add(&cache->accessors, 1);
+    cache->delete = 1;
+
+    unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
+
+    if (acc == 0) {
+      drop(cache->data);
+      map_remove(&ctx->cached, &name);
+    }
+  }
+}
+
+cached* ctx_fopen(ctx_t* ctx, char* name) {
+  cached* cache = ctx_cache_find(ctx, name);
+
+  if (!cache) {
+    FILE* f = fopen(name, "r");
+		if (!f) return NULL;
+		
+    fseek(f, 0, SEEK_END);
+    unsigned long len = ftell(f);
+
+    char* data = heap(len);
+    fseek(f, 0, SEEK_SET);
+    fread(data, len, 1, f);
+
+    fclose(f);
+
+    cache = ctx_cache_new(ctx, name, data, len);
+  }
+
+  return cache;
 }
 
 //lock by key, to ensure it is one to one with list index
@@ -151,6 +259,8 @@ void lock_article(ctx_t* ctx, char* path, unsigned long sz) {
 void unlock_article(ctx_t* ctx, char* path, unsigned long sz) {
   map_sized_t key = {.bin=path, .size=sz};
   mtx_t* m = map_find(&ctx->article_lock, &key);
+	
+	mtx_unlock(m);
 
   if (m && mtx_trylock(m) == thrd_success) {
     mtx_destroy(m);
@@ -179,7 +289,7 @@ typedef struct __attribute__((__packed__)) {
 	permissions_t perms;
 } userdata_t;
 
-typedef filemap_object user_t;
+typedef filemap_object filemap_object;
 
 char* user_password_error(char* password) {
 	if (strlen(password) < MIN_PASSWORD)
@@ -205,27 +315,11 @@ char* user_error(char* username, char* email) {
 	return NULL;
 }
 
-user_t update_user(ctx_t* ctx, filemap_partial_object* obj, user_t *user, char **fields, uint64_t *lengths) {
-  filemap_delete_object(&ctx->user_fmap, user);
-  user_t new_user = filemap_push(&ctx->user_fmap, fields, lengths);
-
-  filemap_list_update(&ctx->user_id, obj, &new_user);
-
-  return new_user;
-}
-
-user_t update_user_session(session_t *session, user_t *user,
-                           char **fields, uint64_t *lengths) {
-  user_t new_user = update_user(session->ctx, &session->user_ses->user, user, fields, lengths);
-	session->user_ses->user = filemap_partialize(&session->user_ses->user, &new_user);
-
-	return new_user;
-}
-
 typedef enum: uint8_t {
 	article_text = 0,
 	article_group,
-	article_img
+	article_img,
+  article_dead
 } article_type;
 
 typedef struct __attribute__((__packed__)) {

@@ -2,16 +2,16 @@
 
 #pragma once
 #include <stdint.h>
+#include <threads.h>
+#include <stdatomic.h>
 #include <event2/event.h>
 #include <openssl/evp.h>
-#include "vector.h"
-#include <threads.h>
-#include <time.h>
-#include <stdatomic.h>
 #include "hashtable.h"
+#include "vector.h"
+#include <time.h>
 extern char* ERROR_TEMPLATE;
 extern char* GLOBAL_TEMPLATE;
-#define CONTENT_MAX 500
+#define CONTENT_MAX 50*1024*1024 //50 mb
 #define CLEANUP_INTERVAL 24*3600
 typedef enum {GET, POST} method_t;
 typedef enum {url_formdata, multipart_formdata} content_type;
@@ -53,6 +53,31 @@ typedef struct {
 	atomic_ulong last_get;
 	atomic_ulong last_lock;
 } user_session;
+typedef enum: uint64_t {
+  user_name_i = 0,
+  user_email_i,
+  user_data_i,
+  user_bio_i,
+  user_length_i
+} user_idx;
+typedef enum: uint64_t {
+  article_data_i = 0,
+  article_items_i,
+  article_path_i,
+  article_contrib_i,
+  article_html_i,
+  article_length_i
+} article_idx;
+typedef struct {
+  atomic_ulong accessors;
+  atomic_ulong accesses;
+  time_t first_cache;
+
+  char delete;
+
+  char* data;
+  unsigned long len;
+} cached;
 typedef struct {
   struct event_base *evbase;
 
@@ -72,7 +97,6 @@ typedef struct {
 	filemap_list_t article_id;
 
 	filemap_index_t article_by_name;
-	filemap_index_t article_by_user;
 
 	filemap_ordered_list_t articles_alphabetical;
 	filemap_ordered_list_t articles_newest;
@@ -81,6 +105,8 @@ typedef struct {
 	map_t user_sessions_by_idx;
 
   map_t article_lock;
+
+  map_t cached; //maps to file name of cached portion
 } ctx_t;
 typedef struct {
   ctx_t *ctx;
@@ -102,8 +128,14 @@ typedef struct {
   } parser;
 
   vector_t requests;
+  int closed;
 } session_t;
 void cleanup_sessions(ctx_t* ctx);
+cached* ctx_cache_find(ctx_t* ctx, char* name);
+cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len);
+void ctx_cache_done(ctx_t* ctx, cached* cache, char* name);
+void ctx_cache_remove(ctx_t* ctx, char* name);
+cached* ctx_fopen(ctx_t* ctx, char* name);
 void lock_article(ctx_t* ctx, char* path, unsigned long sz);
 void unlock_article(ctx_t* ctx, char* path, unsigned long sz);
 typedef enum: uint8_t {
@@ -120,16 +152,14 @@ typedef struct __attribute__((__packed__)) {
 
 	permissions_t perms;
 } userdata_t;
-typedef filemap_object user_t;
+typedef filemap_object filemap_object;
 char* user_password_error(char* password);
 char* user_error(char* username, char* email);
-user_t update_user(ctx_t* ctx, filemap_partial_object* obj, user_t *user, char **fields, uint64_t *lengths);
-user_t update_user_session(session_t *session, user_t *user,
-                           char **fields, uint64_t *lengths);
 typedef enum: uint8_t {
 	article_text = 0,
 	article_group,
-	article_img
+	article_img,
+  article_dead
 } article_type;
 typedef struct __attribute__((__packed__)) {
 	article_type ty;

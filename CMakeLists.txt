@@ -2,19 +2,23 @@ cmake_minimum_required(VERSION 3.15)
 set(CMAKE_C_STANDARD 11)
 project(wikithing)
 
+if (CMAKE_BUILD_TYPE MATCHES Debug)
+	add_compile_definitions(BUILD_DEBUG)
+endif ()
+
 add_subdirectory(corecommon)
 
 include_directories(./include ./corecommon/src /usr/local/include)
 
-file(GLOB SRC src/*.c)
+file(GLOB SRC src/*.c src/*.h)
 list(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c ${CMAKE_CURRENT_SOURCE_DIR}/src/util_main.c)
 
 add_executable(wikithing ${SRC} src/main.c)
 
-add_custom_target(genheader_wikithing COMMAND ${CMAKE_CURRENT_BINARY_DIR}/corecommon/headergen ${CMAKE_SOURCE_DIR}/src)
+add_custom_target(genheader_wikithing COMMAND headergen ${CMAKE_SOURCE_DIR}/src)
 add_dependencies(genheader_wikithing headergen)
 
-add_dependencies(wikithing genheader_wikithing corecommon)
+add_dependencies(wikithing corecommon genheader_wikithing)
 
 find_library(LIBEVENT libevent.a)
 find_library(LIBEVENT_PTHREADS libevent_pthreads.a)

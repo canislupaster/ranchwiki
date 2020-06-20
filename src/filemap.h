@@ -1,14 +1,14 @@
 // Automatically generated header.
 
 #pragma once
+#include <stdio.h>
+#include <string.h>
+#include "threads.h"
+#include "vector.h"
 #include <err.h>
 #include <stdint.h>  //ints for compatibility, since we are writing to files
-#include <string.h>
-#include "vector.h"
-#include <stdio.h>
 #include <time.h>
 #include "siphash.h"
-#include "threads.h"
 #include "util.h"
 typedef struct {
   mtx_t lock;
@@ -94,18 +94,27 @@ typedef struct {
 filemap_field filemap_cpyfield(filemap_t* filemap,
 			       filemap_partial_object* partial,
 			       unsigned field);
+filemap_field filemap_cpyfieldref(filemap_t* filemap, filemap_partial_object* partial, unsigned field);
 filemap_partial_object filemap_insert(filemap_index_t* index,
 				      filemap_object* obj);
-void filemap_remove(filemap_index_t* index, filemap_partial_object* obj);
+int filemap_remove(filemap_index_t* index, char* key, uint64_t key_size);
 filemap_partial_object filemap_add(filemap_list_t* list, filemap_object* obj);
 filemap_partial_object filemap_get_idx(filemap_list_t* list, uint64_t i);
 void filemap_list_update(filemap_list_t* list, filemap_partial_object* partial,
 			 filemap_object* obj);
 filemap_object filemap_push(filemap_t* filemap, char** fields,
 			    uint64_t* lengths);
+typedef struct {
+  uint64_t field;
+  char* new;
+  uint64_t len;
+} update_t;
+filemap_object filemap_push_updated(filemap_t* filemap, filemap_object* base, update_t* updates, unsigned count);
+void filemap_push_field(filemap_object* obj, uint64_t field, uint64_t size, void* x);
 filemap_object filemap_findcpy(filemap_index_t* index, char* key,
 			       uint64_t key_size);
 void filemap_delete_object(filemap_t* filemap, filemap_object* obj);
+void filemap_updated_free(filemap_t* fmap, filemap_object* obj);
 void filemap_object_free(filemap_t* fmap, filemap_object* obj);
 void filemap_index_free(filemap_index_t* index);
 void filemap_list_free(filemap_list_t* list);

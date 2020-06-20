@@ -1,26 +1,41 @@
-path: <p>%!*0
-  /<a href="%0" >%1</a>
-!%</p>
-<hr>
+<p><a href="/" >home</a>%!*0/<a href="%0" >%1</a>!%</p>
 
 <h1>%0</h1>
-<br/>
 
 %!0
+%!1
+<!--image-->
+<img src="/wikisrc/%2" />
+!%
+
+%!!1
 <!--text-->
-%1
+%#1
+!%
 
 <br/>
-contributors: 
+<b>contributors: </b>
 %!*1
- <a href="/account/%0" >%0</a>
+  <a href="/account/%0" >%0</a>
 !%
+
+<form action="/delete/%2" method="POST" >
+  <p>
+    %!2
+      <a href="/edit/%2" >edit</a>
+    !%
+    %!3
+      <input type="submit" value="delete" />
+    !%
+  </p>
+</form>
+
 !%
 
 %!!0
 <!--group-->
 %!*1
-<a href="./%0" >%0</a>
-<br/>
+  <a href="./%0" >%0%!0/!%</a>
+  <br/>
 !%
 !%

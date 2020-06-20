@@ -1,0 +1,66 @@
+#container {
+  margin: auto;
+  width: 50%;
+  padding: 0 10px 12px 10px;
+  min-height: 90%
+}
+
+@media (max-width: 1000px) { 
+  #container {
+    width: auto;
+    margin: 0 10px;
+  }
+} 
+
+html, body {
+  height: 100%;
+  padding: 0;
+  margin: 0;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  background-color: black;
+  font-family: helvetica;
+  font-weight: bold;
+  color: white;
+}
+
+h1 {
+  margin-top: 12px;
+}
+
+h1, b {
+  font-weight: bolder;
+}
+
+a {
+  color: lightgray;
+}
+
+textarea {
+  resize: none;
+}
+
+input[type="submit"] {
+  background: none;
+  border: none;
+  color: lightgray;
+
+  text-decoration: underline;
+  cursor: pointer;
+
+  font-family: helvetica;
+  font-weight: bold;
+  padding: 0;
+  font-size: 1em;
+}
+
+img {
+  max-width: 100%;
+
+  left: 50%;
+  position: relative;
+  transform: translate(-50%, 0);
+}

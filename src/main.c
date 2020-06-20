@@ -5,6 +5,7 @@
 #include <openssl/evp.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 
 #include "context.h"
 #include "filemap.h"
@@ -28,6 +29,9 @@ void interrupt_callback(int signal, short events, void* arg) {
   event_base_loopbreak(ctx->evbase);
 }
 
+//void sighandler(int sig, siginfo_t* info, void* arg) {
+//}
+
 int util_main(void* udata) {
   ctx_t* ctx = udata;
 
@@ -38,26 +42,43 @@ int util_main(void* udata) {
     in = heapcpy(sz+1, in);
     in[sz] = 0;
 
-    vector_t arg = vector_split_str(in, " ");
+    vector_t arg = vector_split_str(in, " \n");
 
-    if (strcmp(vector_getstr(&arg, 0), "rank")==0 && arg.length == 3) {
+    if (strcmp(vector_getstr(&arg, 0), "rank")==0) {
       char* name = vector_getstr(&arg, 1);
 
       filemap_partial_object name_user_ref = filemap_find(&ctx->user_by_name, name, strlen(name)+1);
-      if (!name_user_ref.exists) perror("User not found");
+			if (!name_user_ref.exists) {
+				perror("User not found");
+				drop(in); continue;
+			}
 
       filemap_partial_object list_user = filemap_deref(&ctx->user_id, &name_user_ref);
 
-      user_t user = filemap_cpy(&ctx->user_fmap, &list_user);
+      filemap_object user = filemap_cpy(&ctx->user_fmap, &list_user);
 
-      userdata_t* data = (userdata_t*)user.fields[2];
+      userdata_t* data = (userdata_t*)user.fields[user_data_i];
       data->perms = (char)atoi(vector_getstr(&arg, 2));
 
-      map_remove(&ctx->user_sessions_by_idx, &list_user.index);
-      update_user(ctx, &list_user, &user, user.fields, user.lengths);
+      user_session** ses_ref = map_find(&ctx->user_sessions_by_idx, &list_user.index);
+      user_session* ses = ses_ref ? *ses_ref : NULL;
+      if (ses) mtx_lock(&ses->lock);
+
+      filemap_object new_u = filemap_push(&ctx->user_fmap, user.fields, user.lengths);
+      filemap_list_update(&ctx->user_id, &list_user, &new_u);
+      filemap_delete_object(&ctx->user_fmap, &user);
+
+      if (ses) {
+        ses->user = filemap_partialize(&list_user, &new_u);
+        mtx_unlock(&ses->lock);
+      }
+
+      filemap_object_free(&ctx->user_fmap, &user);
       printf("Permissions updated\n");
+		} else if (strcmp(vector_getstr(&arg, 0), "quit")==0) {
+      event_base_loopbreak(ctx->evbase);
     } else {
-      perror("Action not found");
+      fprintf(stderr, "Action %s not found\n", vector_getstr(&arg, 0));
     }
 
     drop(in);
@@ -107,6 +128,12 @@ int main(int argc, char** argv) {
   //
   // return 0;
 
+  memcheck_init();
+
+  //struct sigaction segv;
+  //segv.__sigaction_u.__sa_sigaction = &sighandler;
+  //sigaction(SIGSEGV, &segv, NULL);
+
   if (argc < 3) {
     errx(1, "need templates directory and port as arguments");
   }
@@ -124,15 +151,21 @@ int main(int argc, char** argv) {
   ctx.resources = map_new();
   map_configure_string_key(&ctx.resources, sizeof(resource));
 
+  ctx.cached = map_new();
+	ctx.cached.free = free_string;
+	
+  map_distribute(&ctx.cached);
+  map_configure_string_key(&ctx.cached, sizeof(cached));
+
   // user, email, data, bio
   ctx.user_id = filemap_list_new("./user_id", 0);
 
-  ctx.user_fmap = filemap_new("./users", 4, 0);
+  ctx.user_fmap = filemap_new("./users", user_length_i, 0);
   ctx.user_fmap.alias = &ctx.user_id;
 
-  ctx.user_by_name = filemap_index_new(&ctx.user_fmap, "./users_by_name", 0, 0);
+  ctx.user_by_name = filemap_index_new(&ctx.user_fmap, "./users_by_name", user_name_i, 0);
   ctx.user_by_email =
-      filemap_index_new(&ctx.user_fmap, "./users_by_email", 1, 0);
+      filemap_index_new(&ctx.user_fmap, "./users_by_email", user_email_i, 0);
 
   ctx.user_sessions = map_new();
   ctx.user_sessions.free = free_string;
@@ -150,14 +183,13 @@ int main(int argc, char** argv) {
   map_distribute(&ctx.article_lock);
   map_configure_sized_key(&ctx.article_lock, sizeof(mtx_t));
 
-  ctx.article_id = filemap_list_new("./article_id", 0);  // avoid update hell
+  ctx.article_id = filemap_list_new("./article_id", 1);  // avoid update hell
 
-  // data, referenced by/items, path, contributors
-  ctx.article_fmap = filemap_new("./articles", 4, 0);
+  ctx.article_fmap = filemap_new("./articles", article_length_i, 1);
   ctx.article_fmap.alias = &ctx.article_id;
 
   ctx.article_by_name =
-      filemap_index_new(&ctx.article_fmap, "./articles_by_name", 2, 0);
+      filemap_index_new(&ctx.article_fmap, "./articles_by_name", article_path_i, 1);
 
   tinydir_dir dir;
   tinydir_open(&dir, argv[1]);
@@ -235,6 +267,8 @@ int main(int argc, char** argv) {
   filemap_free(&ctx.article_fmap);
   filemap_list_free(&ctx.article_id);
   filemap_index_free(&ctx.article_by_name);
+
+  memcheck();
 
   return 0;
 }
