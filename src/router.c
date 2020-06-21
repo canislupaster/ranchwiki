@@ -1638,6 +1638,12 @@ void route(session_t* session, request* req) {
 		//update object (if at all)
 		filemap_object new_obj;
 		if (content_change || path_change) {
+			vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
+			
+			if (vector_search(&contribs, &session->user_ses->user.index)==0) {
+				filemap_push_field(&obj, article_contrib_i, 8, &session->user_ses->user.index);
+			}
+
 			new_obj = filemap_push_updated(&session->ctx->article_fmap, &obj,
 				(update_t[]){{.field=article_path_i, .new=flattened_path->data, .len=flattened_path->length},
 					{.field=article_html_i, .new=html_cache, .len=strlen(html_cache)+1}}, 2);
@@ -1657,7 +1663,8 @@ void route(session_t* session, request* req) {
 			filemap_object idx_obj = filemap_index_obj(&new_obj, &new_article);
 			filemap_insert(&session->ctx->article_by_name, &idx_obj);
 
-			article_group_insert(session->ctx, &new_groups, &new_path, &new_flattened, session->user_ses->user.index, &new_article);
+			article_group_insert(session->ctx, &new_groups, &new_path, &new_flattened,
+				session->user_ses->user.index, &new_article);
 			vector_free(&new_groups);
 			
 			vector_t old_groups = vector_new(sizeof(filemap_partial_object));

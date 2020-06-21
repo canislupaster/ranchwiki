@@ -14,11 +14,13 @@ file(GLOB SRC src/*.c src/*.h)
 list(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c ${CMAKE_CURRENT_SOURCE_DIR}/src/util_main.c)
 
 add_executable(ranch ${SRC} src/main.c)
+add_executable(ranch-contained ${SRC} src/container.c)
 
 add_custom_target(genheader_ranch COMMAND headergen ${CMAKE_SOURCE_DIR}/src)
 add_dependencies(genheader_ranch headergen)
 
 add_dependencies(ranch corecommon genheader_ranch)
+add_dependencies(ranch-contained corecommon genheader_ranch)
 
 find_library(LIBEVENT libevent.a)
 find_library(LIBEVENT_PTHREADS libevent_pthreads.a)

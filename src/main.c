@@ -128,8 +128,6 @@ int main(int argc, char** argv) {
   //
   // return 0;
 
-  memcheck_init();
-
   //struct sigaction segv;
   //segv.__sigaction_u.__sa_sigaction = &sighandler;
   //sigaction(SIGSEGV, &segv, NULL);
@@ -252,6 +250,10 @@ int main(int argc, char** argv) {
       evsignal_new(ctx.evbase, SIGINT, interrupt_callback, &ctx);
   event_add(interrupt, NULL);
 
+#if BUILD_DEBUG
+  memcheck_init();
+#endif
+
   event_base_loop(ctx.evbase, 0);
   event_base_free(ctx.evbase);
 
@@ -268,7 +270,9 @@ int main(int argc, char** argv) {
   filemap_list_free(&ctx.article_id);
   filemap_index_free(&ctx.article_by_name);
 
+#if BUILD_DEBUG
   memcheck();
+#endif
 
   return 0;
 }
