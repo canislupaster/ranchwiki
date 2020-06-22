@@ -1,18 +1,22 @@
 // Automatically generated header.
 
 #pragma once
-#include <event2/event.h>
-#include "hashtable.h"
-#include <stdint.h>
-#include <threads.h>
 #include <time.h>
-#include <stdatomic.h>
+#include <event2/event.h>
 #include <openssl/evp.h>
 #include "vector.h"
+#include <stdint.h>
+#include <threads.h>
+#include <stdatomic.h>
+#include "hashtable.h"
 extern char* ERROR_TEMPLATE;
 extern char* GLOBAL_TEMPLATE;
 #define CONTENT_MAX 50*1024*1024 //50 mb
+#define SESSION_TIMEOUT 3600*24*60 //60 days
 #define CLEANUP_INTERVAL 24*3600
+#include "filemap.h"
+#define CACHE_EXPIRY 3600 //seconds after which to expire cache's weighting 
+#define CACHE_MIN 100 //accesses per hour to qualify in cache
 typedef enum {GET, POST} method_t;
 typedef enum {url_formdata, multipart_formdata} content_type;
 typedef char* query[2];
@@ -42,7 +46,6 @@ typedef struct {
   char* content;
 	unsigned long len;
 } resource;
-#include "filemap.h"
 typedef struct {
 	filemap_partial_object user;
   mtx_t lock; //transaction lock
@@ -146,6 +149,9 @@ typedef enum: uint8_t {
 	perms_admin = 0x8
 } permissions_t;
 #define HASH_LENGTH 32 //256 bit SHA
+#define MIN_USERNAME 1
+#define MAX_USERNAME 20
+#define MIN_PASSWORD 4
 typedef struct __attribute__((__packed__)) {
 	unsigned char password_hash[HASH_LENGTH];
 	int32_t salt;

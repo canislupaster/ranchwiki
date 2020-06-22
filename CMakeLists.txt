@@ -11,16 +11,14 @@ add_subdirectory(corecommon)
 include_directories(./include ./corecommon/src /usr/local/include)
 
 file(GLOB SRC src/*.c src/*.h)
-list(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c ${CMAKE_CURRENT_SOURCE_DIR}/src/util_main.c)
+list(REMOVE_ITEM SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/main.c ${CMAKE_CURRENT_SOURCE_DIR}/src/container.c)
 
 add_executable(ranch ${SRC} src/main.c)
-add_executable(ranch-contained ${SRC} src/container.c)
 
 add_custom_target(genheader_ranch COMMAND headergen ${CMAKE_SOURCE_DIR}/src)
 add_dependencies(genheader_ranch headergen)
 
 add_dependencies(ranch corecommon genheader_ranch)
-add_dependencies(ranch-contained corecommon genheader_ranch)
 
 find_library(LIBEVENT libevent.a)
 find_library(LIBEVENT_PTHREADS libevent_pthreads.a)
@@ -32,3 +30,8 @@ find_package(Threads REQUIRED)
 
 target_link_libraries(ranch PUBLIC corecommon ${LIBEVENT} ${LIBEVENT_PTHREADS} ${OPENSSL_CRYPTO_LIBRARY} Threads::Threads)
 target_include_directories(ranch PUBLIC ${OPENSSL_INCLUDE_DIR})
+
+if (CMAKE_HOST_SYSTEM_NAME MATCHES LINUX)
+	add_executable(ranch-contained ${SRC} src/container.c)
+	add_dependencies(ranch-contained corecommon genheader_ranch)
+endif ()

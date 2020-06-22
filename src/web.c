@@ -23,7 +23,6 @@
 #include "hashtable.h"
 
 #include "context.h"
-#include "router.h"
 #include "reasonphrases.h"
 
 #define TIMEOUT 120
@@ -820,6 +819,9 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
     return 0; //wait for more to arrive
   }
 }
+
+
+void route(session_t* session, request* req);
 
 /* readcb for bufferevent after client connection header was
    checked. */

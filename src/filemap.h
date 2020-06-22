@@ -1,15 +1,15 @@
 // Automatically generated header.
 
 #pragma once
+#include <stdint.h>  //ints for compatibility, since we are writing to files
 #include <stdio.h>
 #include <string.h>
 #include "threads.h"
-#include "vector.h"
 #include <err.h>
-#include <stdint.h>  //ints for compatibility, since we are writing to files
 #include <time.h>
 #include "siphash.h"
 #include "util.h"
+#include "vector.h"
 typedef struct {
   mtx_t lock;
   FILE* file;

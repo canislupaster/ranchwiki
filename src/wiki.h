@@ -1,11 +1,11 @@
 // Automatically generated header.
 
 #pragma once
-#include "stdlib.h"
-#include <sys/stat.h>
-#include "vector.h"
-#include "hashtable.h"
 #include "stdio.h"
+#include <sys/stat.h>
+#include "hashtable.h"
+#include "stdlib.h"
+#include "vector.h"
 #define DATA_PATH "./data/"
 typedef struct {
   uint64_t pos;
