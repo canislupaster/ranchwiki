@@ -65,7 +65,7 @@ typedef struct {
 	atomic_ulong last_lock;
 } user_session;
 
-typedef enum: uint64_t {
+typedef enum {
   user_name_i = 0,
   user_email_i,
   user_data_i,
@@ -74,7 +74,7 @@ typedef enum: uint64_t {
 } user_idx;
 
 // data, referenced by/items, path, contributors, html cache
-typedef enum: uint64_t {
+typedef enum {
   article_data_i = 0,
   article_items_i,
   article_path_i,
@@ -269,7 +269,7 @@ void unlock_article(ctx_t* ctx, char* path, unsigned long sz) {
   }
 }
 
-typedef enum: uint8_t {
+typedef enum __attribute__((__packed__)) {
 	perms_none = 0x0,
 	perms_create_article = 0x1,
 	perms_edit_article = 0x2,
@@ -315,7 +315,7 @@ char* user_error(char* username, char* email) {
 	return NULL;
 }
 
-typedef enum: uint8_t {
+typedef enum __attribute__((__packed__)) {
 	article_text = 0,
 	article_group,
 	article_img,

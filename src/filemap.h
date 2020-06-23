@@ -1,14 +1,14 @@
 // Automatically generated header.
 
 #pragma once
+#include <err.h>
 #include <stdint.h>  //ints for compatibility, since we are writing to files
 #include <stdio.h>
 #include <string.h>
-#include "threads.h"
-#include <err.h>
 #include <time.h>
-#include "siphash.h"
 #include "util.h"
+#include "siphash.h"
+#include "threads.h"
 #include "vector.h"
 typedef struct {
   mtx_t lock;

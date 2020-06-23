@@ -2,10 +2,10 @@
 
 #pragma once
 #include "stdio.h"
-#include <sys/stat.h>
-#include "hashtable.h"
 #include "stdlib.h"
+#include <sys/stat.h>
 #include "vector.h"
+#include "hashtable.h"
 #define DATA_PATH "./data/"
 typedef struct {
   uint64_t pos;
