@@ -42,3 +42,4 @@ xcode-build
 .clangd
 
 .DS_Store
+*.swp
