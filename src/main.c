@@ -19,9 +19,22 @@
 
 const char* TEMPLATE_EXT = ".html";
 
-void cleanup_callback(evutil_socket_t fd, short what, void* arg) {
+void cleanup_callback(int fd, short what, void* arg) {
   ctx_t* ctx = arg;
   cleanup_sessions(ctx);
+}
+
+void wcache_callback(int fd, short what, void* arg) {
+  ctx_t* ctx = arg;
+
+	filemap_wcached(&ctx->user_fmap);
+	filemap_list_wcached(&ctx->user_id);
+	filemap_index_wcached(&ctx->user_by_email);
+	filemap_index_wcached(&ctx->user_by_name);
+
+	filemap_wcached(&ctx->article_fmap);
+	filemap_list_wcached(&ctx->article_id);
+	filemap_index_wcached(&ctx->article_by_name);
 }
 
 void interrupt_callback(int signal, short events, void* arg) {
@@ -242,9 +255,11 @@ int main(int argc, char** argv) {
 
   start_listen(&ctx, argv[2]);
 
-  struct event* cleanup = event_new(ctx.evbase, -1, EV_TIMEOUT | EV_PERSIST,
-                                    cleanup_callback, &ctx);
+  struct event* cleanup = event_new(ctx.evbase, -1, EV_TIMEOUT | EV_PERSIST, cleanup_callback, &ctx);
   event_add(cleanup, &(struct timeval){CLEANUP_INTERVAL, 0});
+
+  struct event* wcache = event_new(ctx.evbase, -1, EV_TIMEOUT | EV_PERSIST, wcache_callback, &ctx);
+  event_add(wcache, &(struct timeval){WCACHE_INTERVAL, 0});
 
   struct event* interrupt =
       evsignal_new(ctx.evbase, SIGINT, interrupt_callback, &ctx);

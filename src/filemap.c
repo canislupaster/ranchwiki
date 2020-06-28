@@ -1367,7 +1367,8 @@ void filemap_object_free(filemap_t* fmap, filemap_object* obj) {
   drop(obj->lengths);
 }
 
-void filemap_index_free(filemap_index_t* index) {
+void filemap_index_wcached(filemap_index_t* index) {
+	mtx_lock(&index->lock);
   fseek(index->file, 4 * 4, SEEK_SET);	// skip seed
 
   fwrite(&index->slots, 8, 1, index->file);
@@ -1376,40 +1377,62 @@ void filemap_index_free(filemap_index_t* index) {
 
   fwrite(&index->length, 8, 1, index->file);
 
-  fclose(index->file);
+	mtx_unlock(&index->lock);
+}
 
+void filemap_index_free(filemap_index_t* index) {
+	filemap_index_wcached(index);
+  fclose(index->file);
   mtx_destroy(&index->lock);
 }
 
-void filemap_ordered_free(filemap_ordered_list_t* index) {
-  fseek(index->file, 0, SEEK_SET);
+void filemap_ordered_wcache(filemap_ordered_list_t* order) {
+	mtx_lock(&order->lock);
 
-  fwrite(&index->pages, 8, 1, index->file);
+  fseek(order->file, 0, SEEK_SET);
 
-  fwrite(&index->min, 8, 1, index->file);
-  fwrite(&index->max, 8, 1, index->file);
+  fwrite(&order->pages, 8, 1, order->file);
 
-  fwrite(&index->first, 8, 1, index->file);
+  fwrite(&order->min, 8, 1, order->file);
+  fwrite(&order->max, 8, 1, order->file);
 
-  fclose(index->file);
+  fwrite(&order->first, 8, 1, order->file);
 
-  mtx_destroy(&index->lock);
+	mtx_unlock(&order->lock);
+}
+
+void filemap_ordered_free(filemap_ordered_list_t* order) {
+  filemap_ordered_wcache(order);
+  fclose(order->file);
+  mtx_destroy(&order->lock);
+}
+
+void filemap_list_wcached(filemap_list_t* list) {
+	mtx_lock(&list->lock);
+
+  fseek(list->file, 0, SEEK_SET);
+  fwrite(&list->length, 8, 1, list->file);
+
+	mtx_unlock(&list->lock);
 }
 
 void filemap_list_free(filemap_list_t* list) {
-  fseek(list->file, 0, SEEK_SET);
-
-  fwrite(&list->length, 8, 1, list->file);
-
-  fclose(list->file);
-
+  filemap_list_wcached(list);
+	fclose(list->file);
   mtx_destroy(&list->lock);
 }
-void filemap_free(filemap_t* filemap) {
+
+void filemap_wcached(filemap_t* filemap) {
+	mtx_lock(&filemap->lock);
+
   fseek(filemap->data, 0, SEEK_SET);
   fwrite(&filemap->free, 8, 1, filemap->data);
 
-  fclose(filemap->data);
+	mtx_unlock(&filemap->lock);
+}
 
+void filemap_free(filemap_t* filemap) {
+	filemap_wcached(filemap);
+  fclose(filemap->data);
   mtx_destroy(&filemap->lock);
 }

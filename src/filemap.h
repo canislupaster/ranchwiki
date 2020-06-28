@@ -1,15 +1,15 @@
 // Automatically generated header.
 
 #pragma once
+#include <err.h>
+#include <string.h>
+#include "siphash.h"
+#include "threads.h"
+#include "vector.h"
 #include <stdint.h>  //ints for compatibility, since we are writing to files
 #include <stdio.h>
-#include <string.h>
-#include "threads.h"
-#include <err.h>
 #include <time.h>
-#include "siphash.h"
 #include "util.h"
-#include "vector.h"
 typedef struct {
   mtx_t lock;
   FILE* file;
@@ -116,6 +116,9 @@ filemap_object filemap_findcpy(filemap_index_t* index, char* key,
 void filemap_delete_object(filemap_t* filemap, filemap_object* obj);
 void filemap_updated_free(filemap_t* fmap, filemap_object* obj);
 void filemap_object_free(filemap_t* fmap, filemap_object* obj);
+void filemap_index_wcached(filemap_index_t* index);
 void filemap_index_free(filemap_index_t* index);
+void filemap_list_wcached(filemap_list_t* list);
 void filemap_list_free(filemap_list_t* list);
+void filemap_wcached(filemap_t* filemap);
 void filemap_free(filemap_t* filemap);

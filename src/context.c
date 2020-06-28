@@ -16,6 +16,7 @@ const char* GLOBAL_TEMPLATE = "global"; //name of global template
 #define CONTENT_MAX 50*1024*1024 //50 mb
 #define SESSION_TIMEOUT 3600*24*60 //60 days
 #define CLEANUP_INTERVAL 24*3600
+#define WCACHE_INTERVAL 5*60
 #define CACHE_EXPIRY 3600 //seconds after which to expire cache's weighting 
 #define CACHE_MIN 100 //accesses per hour to qualify in cache
 
