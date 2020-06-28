@@ -2,14 +2,14 @@
 
 #pragma once
 #include <err.h>
-#include <string.h>
-#include "siphash.h"
-#include "threads.h"
-#include "vector.h"
 #include <stdint.h>  //ints for compatibility, since we are writing to files
 #include <stdio.h>
 #include <time.h>
+#include "siphash.h"
+#include <string.h>
+#include "threads.h"
 #include "util.h"
+#include "vector.h"
 typedef struct {
   mtx_t lock;
   FILE* file;

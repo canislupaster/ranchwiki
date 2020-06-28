@@ -1,18 +1,19 @@
 // Automatically generated header.
 
 #pragma once
-#include <stdint.h>
-#include <threads.h>
+#include <time.h>
 #include <event2/event.h>
 #include <openssl/evp.h>
 #include "hashtable.h"
-#include "vector.h"
-#include <time.h>
+#include <stdint.h>
+#include <threads.h>
 #include <stdatomic.h>
+#include "vector.h"
 extern char* ERROR_TEMPLATE;
 extern char* GLOBAL_TEMPLATE;
 #define CONTENT_MAX 50*1024*1024 //50 mb
 #define CLEANUP_INTERVAL 24*3600
+#define WCACHE_INTERVAL 5*60
 typedef enum {GET, POST} method_t;
 typedef enum {url_formdata, multipart_formdata} content_type;
 typedef char* query[2];
@@ -53,14 +54,14 @@ typedef struct {
 	atomic_ulong last_get;
 	atomic_ulong last_lock;
 } user_session;
-typedef enum: uint64_t {
+typedef enum {
   user_name_i = 0,
   user_email_i,
   user_data_i,
   user_bio_i,
   user_length_i
 } user_idx;
-typedef enum: uint64_t {
+typedef enum {
   article_data_i = 0,
   article_items_i,
   article_path_i,
@@ -138,7 +139,7 @@ void ctx_cache_remove(ctx_t* ctx, char* name);
 cached* ctx_fopen(ctx_t* ctx, char* name);
 void lock_article(ctx_t* ctx, char* path, unsigned long sz);
 void unlock_article(ctx_t* ctx, char* path, unsigned long sz);
-typedef enum: uint8_t {
+typedef enum __attribute__((__packed__)) {
 	perms_none = 0x0,
 	perms_create_article = 0x1,
 	perms_edit_article = 0x2,
@@ -155,7 +156,7 @@ typedef struct __attribute__((__packed__)) {
 typedef filemap_object filemap_object;
 char* user_password_error(char* password);
 char* user_error(char* username, char* email);
-typedef enum: uint8_t {
+typedef enum __attribute__((__packed__)) {
 	article_text = 0,
 	article_group,
 	article_img,

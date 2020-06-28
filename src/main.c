@@ -46,16 +46,20 @@ void interrupt_callback(int signal, short events, void* arg) {
 //}
 
 int util_main(void* udata) {
+	printf("util started\n");
+
   ctx_t* ctx = udata;
 
-  char* in;
-  size_t sz;
-
-  while ((in = fgetln(stdin, &sz))) {
-    in = heapcpy(sz+1, in);
-    in[sz] = 0;
+  while (1) {
+		char* in = NULL;
+		size_t sz = 0;
+		getline(&in, &sz, stdin);
 
     vector_t arg = vector_split_str(in, " \n");
+		if (arg.length == 0) {
+			drop(in);
+			continue;
+		}
 
     if (strcmp(vector_getstr(&arg, 0), "rank")==0) {
       char* name = vector_getstr(&arg, 1);
@@ -145,8 +149,14 @@ int main(int argc, char** argv) {
   //segv.__sigaction_u.__sa_sigaction = &sighandler;
   //sigaction(SIGSEGV, &segv, NULL);
 
+	//reset buffering for use with pipes
+	setvbuf(stdout, NULL, _IOLBF, PIPE_BUF);
+	setvbuf(stderr, NULL, _IOLBF, PIPE_BUF); //needed for formatting for some reason, lest program crashes?? buf needs to match pipe buf??
+
+	printf("starting ranch...\n");
+
   if (argc < 3) {
-    errx(1, "need templates directory and port as arguments");
+    errx(1, "need templates directory and port as arguments\n");
   }
 
   evthread_use_pthreads();
@@ -194,23 +204,23 @@ int main(int argc, char** argv) {
   map_distribute(&ctx.article_lock);
   map_configure_sized_key(&ctx.article_lock, sizeof(mtx_t));
 
-  ctx.article_id = filemap_list_new("./article_id", 1);  // avoid update hell
+  ctx.article_id = filemap_list_new("./article_id", 0);  // avoid update hell
 
-  ctx.article_fmap = filemap_new("./articles", article_length_i, 1);
+  ctx.article_fmap = filemap_new("./articles", article_length_i, 0);
   ctx.article_fmap.alias = &ctx.article_id;
 
   ctx.article_by_name =
-      filemap_index_new(&ctx.article_fmap, "./articles_by_name", article_path_i, 1);
+      filemap_index_new(&ctx.article_fmap, "./articles_by_name", article_path_i, 0);
 
   tinydir_dir dir;
   tinydir_open(&dir, argv[1]);
 
-  tinydir_next(&dir);  // skip .
-  tinydir_next(&dir);  // skip ..
-
-  while (dir.has_next) {
+  for (;dir.has_next; tinydir_next(&dir)) {
     tinydir_file file;
     tinydir_readfile(&dir, &file);
+
+		if (strcmp(file.name, ".")==0 || strcmp(file.name, "..")==0 || strcmp(file.name, "./")==0)
+			continue;
 
     char* filename = heapcpystr(file.name);
 
@@ -244,11 +254,11 @@ int main(int argc, char** argv) {
           &(resource){
               .content = content, .len = strlen(content), .mime = mime});
     }
-
-    tinydir_next(&dir);
   }
 
   tinydir_close(&dir);
+
+	printf("starting util...\n");
 
   thrd_t util;
   thrd_create(&util, util_main, &ctx);

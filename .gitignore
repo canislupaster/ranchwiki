@@ -42,7 +42,10 @@ xcode-build
 .clangd
 
 .DS_Store
+
 wiki/user_id
 wiki/users
 wiki/users_by_email
 wiki/users_by_name
+
+*.swp

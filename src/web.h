@@ -1,21 +1,21 @@
 // Automatically generated header.
 
 #pragma once
-#include <sys/types.h>
-#include <ctype.h>
-#include <string.h>
+#include <stdio.h>
 #include <err.h>
-#include "event2/buffer.h"
+#include "event2/listener.h"
 #include "event2/bufferevent.h"
-#include "vector.h"
 #include "hashtable.h"
 #include "reasonphrases.h"
 #include <sys/socket.h>
-#include <stdio.h>
+#include <sys/types.h>
+#include <ctype.h>
+#include <string.h>
 #include <stdlib.h>
 #include "event2/event.h"
-#include "event2/listener.h"
+#include "event2/buffer.h"
 #include "util.h"
+#include "vector.h"
 #include "context.h"
 void respond(session_t* session, int stat, char* content, unsigned long len, header* headers, int headers_len);
 void respond_redirect(session_t* session, char* url);
