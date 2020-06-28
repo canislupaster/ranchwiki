@@ -743,7 +743,7 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
     
     //handle supported formats
     if (session->parser.req.ctype == url_formdata) {
-			fprintf(stderr, "%s", session->parser.req.content);
+			printf("query: %s\n", session->parser.req.content);
       parse_querystring(session->parser.req.content, &session->parser.req.query);
     } else if (session->parser.req.ctype == multipart_formdata) {
 			char* content = session->parser.req.content;
@@ -839,7 +839,7 @@ void readcb(struct bufferevent *bev, void* ctx) {
 
   //parse request lines
   while ((line = evbuffer_readln(evbuf, NULL, EVBUFFER_EOL_CRLF))) {
-    fprintf(stderr, "%s\n", line);
+    printf("%s\n", line); //log req
 
     //parse new request or finish old one
     if (session->parser.done) {

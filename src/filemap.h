@@ -3,13 +3,13 @@
 #pragma once
 #include <err.h>
 #include <stdint.h>  //ints for compatibility, since we are writing to files
-#include <stdio.h>
 #include <string.h>
 #include <time.h>
-#include "util.h"
 #include "siphash.h"
 #include "threads.h"
 #include "vector.h"
+#include <stdio.h>
+#include "util.h"
 typedef struct {
   mtx_t lock;
   FILE* file;

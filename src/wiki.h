@@ -1,10 +1,10 @@
 // Automatically generated header.
 
 #pragma once
-#include "stdio.h"
 #include "stdlib.h"
-#include <sys/stat.h>
+#include "stdio.h"
 #include "vector.h"
+#include <sys/stat.h>
 #include "hashtable.h"
 #define DATA_PATH "./data/"
 typedef struct {

@@ -1,19 +1,19 @@
 // Automatically generated header.
 
 #pragma once
-#include <stdio.h>
+#include <sys/socket.h>
 #include <string.h>
 #include <err.h>
 #include "event2/buffer.h"
-#include "util.h"
-#include <sys/socket.h>
+#include "event2/bufferevent.h"
+#include "vector.h"
 #include <sys/types.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include "event2/event.h"
 #include "event2/listener.h"
-#include "event2/bufferevent.h"
-#include "vector.h"
+#include "util.h"
 #include "hashtable.h"
 #include "reasonphrases.h"
 #include "context.h"

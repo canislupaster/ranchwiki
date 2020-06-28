@@ -6,11 +6,6 @@ if (CMAKE_BUILD_TYPE MATCHES Debug)
 	add_compile_definitions(BUILD_DEBUG)
 endif ()
 
-if (CMAKE_HOST_SYSTEM_NAME MATCHES LINUX)
-	add_executable(ranch-contained ${SRC} src/container.c)
-	add_dependencies(ranch-contained corecommon genheader_ranch)
-endif ()
-
 if (CMAKE_HOST_SYSTEM_PROCESSOR MATCHES armv7l)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mfpu=neon")
 endif ()
@@ -39,3 +34,10 @@ find_package(Threads REQUIRED)
 
 target_link_libraries(ranch PUBLIC corecommon ${LIBEVENT} ${LIBEVENT_PTHREADS} ${OPENSSL_CRYPTO_LIBRARY} Threads::Threads)
 target_include_directories(ranch PUBLIC ${OPENSSL_INCLUDE_DIR})
+
+if (CMAKE_HOST_SYSTEM_NAME MATCHES Linux)
+	add_executable(ranch-contained src/container.c)
+	add_dependencies(ranch-contained corecommon genheader_ranch)
+	target_link_libraries(ranch-contained corecommon Threads::Threads)
+endif ()
+

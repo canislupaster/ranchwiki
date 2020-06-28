@@ -33,6 +33,8 @@ void interrupt_callback(int signal, short events, void* arg) {
 //}
 
 int util_main(void* udata) {
+	printf("util started\n");
+
   ctx_t* ctx = udata;
 
   while (1) {
@@ -134,8 +136,14 @@ int main(int argc, char** argv) {
   //segv.__sigaction_u.__sa_sigaction = &sighandler;
   //sigaction(SIGSEGV, &segv, NULL);
 
+	//reset buffering for use with pipes
+	setvbuf(stdout, NULL, _IOLBF, PIPE_BUF);
+	setvbuf(stderr, NULL, _IOLBF, PIPE_BUF); //needed for formatting for some reason, lest program crashes?? buf needs to match pipe buf??
+
+	printf("starting ranch...\n");
+
   if (argc < 3) {
-    errx(1, "need templates directory and port as arguments");
+    errx(1, "need templates directory and port as arguments\n");
   }
 
   evthread_use_pthreads();
@@ -236,6 +244,8 @@ int main(int argc, char** argv) {
   }
 
   tinydir_close(&dir);
+
+	printf("starting util...\n");
 
   thrd_t util;
   thrd_create(&util, util_main, &ctx);
