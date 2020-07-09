@@ -1,19 +1,26 @@
 // Automatically generated header.
 
 #pragma once
+#include <stdint.h>
+#include <threads.h>
 #include <time.h>
+#include <stdatomic.h>
 #include <event2/event.h>
 #include <openssl/evp.h>
 #include "hashtable.h"
-#include <stdint.h>
-#include <threads.h>
-#include <stdatomic.h>
+#include "locktable.h"
 #include "vector.h"
 extern char* ERROR_TEMPLATE;
 extern char* GLOBAL_TEMPLATE;
 #define CONTENT_MAX 50*1024*1024 //50 mb
 #define CLEANUP_INTERVAL 24*3600
 #define WCACHE_INTERVAL 5*60
+#define PAGE_SIZE 12
+#define WORD_MIN 1
+#define WORD_MAX 16
+#define WORD_LIMIT 64 //articles per word before overflow
+#define WORD_LOCKS 32
+#define QUERY_MAX 32
 typedef enum {GET, POST} method_t;
 typedef enum {url_formdata, multipart_formdata} content_type;
 typedef char* query[2];
@@ -27,7 +34,7 @@ typedef struct {
 } multipart_data;
 typedef struct {
   method_t method;
-  
+
   vector_t path; //vector of char* segments
   vector_t query; //vector of char* [2], if content type is url formdata
 	vector_t files; //vector of multipart_file, if content type is multipart formdata
@@ -70,6 +77,19 @@ typedef enum {
   article_length_i
 } article_idx;
 typedef struct {
+	unsigned char score;
+	char* word;
+	uint64_t pos;
+} search_token;
+typedef struct __attribute__((__packed__)) {
+	unsigned char score;
+	uint64_t pos;
+	uint64_t article;
+} article_tok;
+typedef struct __attribute__((__packed__)) {
+	article_tok tok[WORD_LIMIT];
+} word_index;
+typedef struct {
   atomic_ulong accessors;
   atomic_ulong accesses;
   time_t first_cache;
@@ -104,6 +124,12 @@ typedef struct {
 
   map_t user_sessions;
 	map_t user_sessions_by_idx;
+
+	locktable_t word_lock;
+	filemap_index_t words;
+	filemap_t wordi_fmap;
+
+	map_t wordi_cache;
 
   map_t article_lock;
 
@@ -172,4 +198,6 @@ typedef struct __attribute__((__packed__)) {
 		uint64_t items;
 		uint64_t referenced_by;
 	};
+	
+	uint64_t edit_time;
 } articledata_t;

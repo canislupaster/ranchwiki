@@ -1,21 +1,21 @@
 // Automatically generated header.
 
 #pragma once
-#include <stdio.h>
-#include <err.h>
-#include "event2/listener.h"
-#include "event2/bufferevent.h"
-#include "hashtable.h"
-#include "reasonphrases.h"
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <ctype.h>
+#include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <err.h>
 #include "event2/event.h"
 #include "event2/buffer.h"
+#include "event2/listener.h"
+#include "event2/bufferevent.h"
 #include "util.h"
 #include "vector.h"
+#include "hashtable.h"
+#include "reasonphrases.h"
 #include "context.h"
 void respond(session_t* session, int stat, char* content, unsigned long len, header* headers, int headers_len);
 void respond_redirect(session_t* session, char* url);
@@ -36,6 +36,7 @@ typedef struct {
 template_t template_new(char* data);
 void respond_template(session_t* session, int stat, char* template_name, char* title, ...);
 void respond_error(session_t* session, int stat, char* err);
+int skip_newline(char** cur);
 char* percent_decode(char* data);
 vector_t query_find(vector_t *vec, char **params, int num_params, int strict);
 vector_t multipart_find(vector_t *vec, char **params, int num_params, int strict);

@@ -14,8 +14,19 @@ error: %0
   <br/>
 	<input type="submit" />
 </form>
+
+<h2>new contributor</h2>
+
+<form method="POST" action="/setcontrib" enctype="application/x-www-form-urlencoded" >
+	path: <input type="text" value="%1" name="path" />
+	<br/>
+	user: <input type="text" name="contributor" />
+  <br/>
+	<input type="submit" name="add" value="add" />
+	<input type="submit" name="add" value="remove" />
+</form>
 !%
 
 %!!0
-<p>You do not have permission to edit an article.</p>
+<p>You do not have permission to edit this article.</p>
 !%

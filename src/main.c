@@ -10,14 +10,36 @@
 #include "context.h"
 #include "filemap.h"
 #include "hashtable.h"
+#include "locktable.h"
 #include "threads.h"
 #include "tinydir.h"
 #include "util.h"
 #include "vector.h"
 #include "web.h"
+#include "router.h"
 #include "wiki.h"
 
+ctx_t* global_ctx;
+
 const char* TEMPLATE_EXT = ".html";
+
+void save_ctx(ctx_t* ctx) {
+  printf("Saving...\n");
+  filemap_free(&ctx->user_fmap);
+  filemap_list_free(&ctx->user_id);
+  filemap_index_free(&ctx->user_by_name);
+  filemap_index_free(&ctx->user_by_email);
+
+  filemap_free(&ctx->article_fmap);
+  filemap_list_free(&ctx->article_id);
+  filemap_index_free(&ctx->article_by_name);
+
+	filemap_ordered_free(&ctx->articles_newest);
+	filemap_ordered_free(&ctx->articles_alphabetical);
+
+	filemap_free(&ctx->wordi_fmap);
+	filemap_index_free(&ctx->words);
+}
 
 void cleanup_callback(int fd, short what, void* arg) {
   ctx_t* ctx = arg;
@@ -42,8 +64,9 @@ void interrupt_callback(int signal, short events, void* arg) {
   event_base_loopbreak(ctx->evbase);
 }
 
-//void sighandler(int sig, siginfo_t* info, void* arg) {
-//}
+void sighandler(int sig, siginfo_t* info, void* arg) {
+	save_ctx(global_ctx);
+}
 
 int util_main(void* udata) {
 	printf("util started\n");
@@ -60,8 +83,10 @@ int util_main(void* udata) {
 			drop(in);
 			continue;
 		}
+		
+		if (strlen(vector_getstr(&arg, arg.length-1))==0) vector_pop(&arg);
 
-    if (strcmp(vector_getstr(&arg, 0), "rank")==0) {
+		if (strcmp(vector_getstr(&arg, 0), "rank")==0 && arg.length == 3) {
       char* name = vector_getstr(&arg, 1);
 
       filemap_partial_object name_user_ref = filemap_find(&ctx->user_by_name, name, strlen(name)+1);
@@ -92,6 +117,70 @@ int util_main(void* udata) {
 
       filemap_object_free(&ctx->user_fmap, &user);
       printf("Permissions updated\n");
+			
+		} else if (strcmp(vector_getstr(&arg, 0), "diff")==0 && arg.length==3) {
+			char* path_str = vector_getstr(&arg, 1);
+			int maxd = atoi(vector_getstr(&arg, 2));
+			
+			vector_t path = vector_new(sizeof(char*));
+			if (!parse_wiki_path(path_str, &path) || maxd==0) {
+				fprintf(stderr, "couldnt parse wiki path / max diffs is zero");
+				
+				vector_free_strings(&path);
+				drop(in);
+				continue;
+			}
+			
+			vector_t wpath = flatten_wikipath(&path);
+			vector_free_strings(&path);
+			
+			text_t txt = txt_new(wpath.data);
+			read_txt(&txt, 0, maxd);
+			
+			if (!txt.current) {
+				fprintf(stderr, "text does not exist");
+				
+				vector_free(&wpath);
+				drop(in);
+				continue;
+			}
+
+			vector_t segs = display_diffs(&txt);
+			vector_iterator iter = vector_iterate(&segs);
+			while (vector_next(&iter)) {
+				dseg* seg = iter.x;
+				char* start = seg->str;
+
+				diff_t* diff = vector_get(&txt.diffs, seg->diff);
+
+				filemap_partial_object author_list = filemap_get_idx(&ctx->user_id, diff->author);
+				filemap_field uname = filemap_cpyfield(&ctx->user_fmap, &author_list, user_name_i);
+
+				if (uname.exists) printf("\ndiff #%lu made by %s\n", seg->diff, uname.val.data);
+				if (uname.exists) vector_free(&uname.val);
+
+				while (seg->str-start < seg->len) {
+					if (skip_newline(&seg->str)) printf("\n");
+					char* linestart = seg->str;
+					
+					while (seg->str-start < seg->len && *seg->str != '\r' && *seg->str != '\n') seg->str++;
+
+					switch (seg->ty) {
+						case dseg_add: printf("+"); break;
+						case dseg_del: printf("-"); break;
+						case dseg_current: printf("="); break;
+					}
+					
+					printf(" | %.*s", (int)(seg->str-linestart), linestart);
+				}
+			}
+			
+			printf("\n");
+			
+			txt_free(&txt);
+			vector_free(&segs);
+			vector_free(&wpath);
+			
 		} else if (strcmp(vector_getstr(&arg, 0), "quit")==0) {
       event_base_loopbreak(ctx->evbase);
     } else {
@@ -145,10 +234,6 @@ int main(int argc, char** argv) {
   //
   // return 0;
 
-  //struct sigaction segv;
-  //segv.__sigaction_u.__sa_sigaction = &sighandler;
-  //sigaction(SIGSEGV, &segv, NULL);
-
 	//reset buffering for use with pipes
 	setvbuf(stdout, NULL, _IOLBF, PIPE_BUF);
 	setvbuf(stderr, NULL, _IOLBF, PIPE_BUF); //needed for formatting for some reason, lest program crashes?? buf needs to match pipe buf??
@@ -163,6 +248,12 @@ int main(int argc, char** argv) {
 
   ctx_t ctx;
   ctx.evbase = event_base_new();
+
+	global_ctx = &ctx;
+
+  struct sigaction segv;
+  segv.sa_sigaction = &sighandler;
+  sigaction(SIGSEGV, &segv, NULL);
 
   ctx.digest_ctx = EVP_MD_CTX_create();
 
@@ -212,6 +303,16 @@ int main(int argc, char** argv) {
   ctx.article_by_name =
       filemap_index_new(&ctx.article_fmap, "./articles_by_name", article_path_i, 0);
 
+	ctx.articles_newest = filemap_ordered_list_new("./article_new", PAGE_SIZE, 0);
+	ctx.articles_alphabetical = filemap_ordered_list_new("./article_abc", PAGE_SIZE, 0);
+
+	ctx.wordi_fmap = filemap_new("./wordi", 2, 0);
+	ctx.words = filemap_index_new(&ctx.wordi_fmap, "./word", 0, 0);
+
+	ctx.word_lock = locktable_new(WORD_LOCKS);
+	ctx.wordi_cache = map_new(sizeof(filemap_partial_object));
+	map_configure_string_key(&ctx.wordi_cache, sizeof(filemap_partial_object));
+
   tinydir_dir dir;
   tinydir_open(&dir, argv[1]);
 
@@ -224,7 +325,19 @@ int main(int argc, char** argv) {
 
     char* filename = heapcpystr(file.name);
 
-    char* content = read_file(file.path);
+		//copypaste until C has tuples
+    FILE* f = fopen(file.path, "rb");
+		
+    fseek(f, 0, SEEK_END);
+    unsigned long len = ftell(f);
+
+    char* data = heap(len+1);
+    fseek(f, 0, SEEK_SET);
+    fread(data, len, 1, f);
+		
+		data[len] = 0;
+
+    fclose(f);
 
     if (strlen(filename) > strlen(TEMPLATE_EXT) &&
         strcmp(filename + strlen(filename) - strlen(TEMPLATE_EXT),
@@ -233,11 +346,11 @@ int main(int argc, char** argv) {
              strlen(TEMPLATE_EXT));
 
       if (strcmp(filename, GLOBAL_TEMPLATE) == 0) {
-        ctx.global = content;
+        ctx.global = data;
       } else {
-        template_t template = template_new(content);
+        template_t template = template_new(data);
         map_insertcpy(&ctx.templates, &filename, &template);
-        drop(content);
+        drop(data);
       }
     } else {
       char* extension = ext(filename);
@@ -245,6 +358,10 @@ int main(int argc, char** argv) {
 
       if (strcmp(extension, ".css") == 0) {
         mime = "text/css";
+			} else if (strcmp(extension, ".png") == 0) {
+				mime = "image/png";
+      } else if (strcmp(extension, ".ico") == 0) {
+				mime = "image/x-icon";
       } else {
         mime = "application/octet-stream";
       }
@@ -252,7 +369,7 @@ int main(int argc, char** argv) {
       map_insertcpy(
           &ctx.resources, &filename,
           &(resource){
-              .content = content, .len = strlen(content), .mime = mime});
+              .content = data, .len = len, .mime = mime});
     }
   }
 
@@ -265,11 +382,11 @@ int main(int argc, char** argv) {
 
   start_listen(&ctx, argv[2]);
 
-  struct event* cleanup = event_new(ctx.evbase, -1, EV_TIMEOUT | EV_PERSIST, cleanup_callback, &ctx);
-  event_add(cleanup, &(struct timeval){CLEANUP_INTERVAL, 0});
+  struct event* cleanup = event_new(ctx.evbase, -1, EV_PERSIST, cleanup_callback, &ctx);
+	event_add(cleanup, &(struct timeval){.tv_sec=CLEANUP_INTERVAL});
 
-  struct event* wcache = event_new(ctx.evbase, -1, EV_TIMEOUT | EV_PERSIST, wcache_callback, &ctx);
-  event_add(wcache, &(struct timeval){WCACHE_INTERVAL, 0});
+  struct event* wcache = event_new(ctx.evbase, -1, EV_PERSIST, wcache_callback, &ctx);
+	event_add(wcache, &(struct timeval){.tv_sec=WCACHE_INTERVAL});
 
   struct event* interrupt =
       evsignal_new(ctx.evbase, SIGINT, interrupt_callback, &ctx);
@@ -285,15 +402,7 @@ int main(int argc, char** argv) {
   EVP_MD_CTX_destroy(ctx.digest_ctx);
   EVP_cleanup();
 
-  printf("Saving...\n");
-  filemap_free(&ctx.user_fmap);
-  filemap_list_free(&ctx.user_id);
-  filemap_index_free(&ctx.user_by_name);
-  filemap_index_free(&ctx.user_by_email);
-
-  filemap_free(&ctx.article_fmap);
-  filemap_list_free(&ctx.article_id);
-  filemap_index_free(&ctx.article_by_name);
+	save_ctx(&ctx);
 
 #if BUILD_DEBUG
   memcheck();

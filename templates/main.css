@@ -40,7 +40,8 @@ a {
 }
 
 textarea {
-  resize: none;
+  resize: vertical;
+	width: 100%;
 }
 
 input[type="submit"] {

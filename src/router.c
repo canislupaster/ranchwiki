@@ -9,6 +9,7 @@
 #include "context.h"
 #include "filemap.h"
 #include "hashtable.h"
+#include "locktable.h"
 #include "util.h"
 #include "vector.h"
 #include "web.h"
@@ -35,7 +36,7 @@ cached* article_current(ctx_t* ctx, vector_t* filepath) {
 	cached* current_cache = ctx_cache_find(ctx, filepath->data);
 	if (!current_cache) {
 		text_t txt = txt_new(filepath->data);
-		read_txt(&txt, 0);
+		read_txt(&txt, 0, 0);
 		current_cache = ctx_cache_new(ctx, filepath->data, heapcpystr(txt.current), strlen(txt.current));
 
 		txt_free(&txt);
@@ -69,24 +70,21 @@ vector_t article_group_list(ctx_t* ctx, filemap_object* article, articledata_t* 
     vector_t item_pathdata = filemap_cpyfield(&ctx->article_fmap, &list_item, article_path_i).val;
 
     vector_t item_path = vector_from_strings(item_pathdata.data, item_data->path_length);
-		char* item_end = vector_getstr(&item_path, item_path.length-1);
+		char* item_end = heapcpystr(vector_getstr(&item_path, item_path.length-1));
 
-		unsigned long len = strlen(item_end);
-    char* end = heap(is_group ? len+2 : len+1);
-		memcpy(end, item_end, len+1);
-		
-		if (is_group) {
-			end[len] = '/';
-			end[len+1] = 0;
-		}
+		vector_t url = vector_new(1);
+		vector_stockstr(&url, "/wiki/");
+		vector_flatten_strings(&item_path, &url, "/", 1);
 
     vector_pushcpy(&items_arg, &(template_args){.cond_args=heapcpy(sizeof(int), &is_group),
-      .sub_args=heapcpy(sizeof(char*[1]), (char*[1]){end})});
-    vector_pushcpy(item_strs, &end);
+      .sub_args=heapcpy(sizeof(char*[2]), (char*[2]){url.data, item_end})});
+
+    vector_pushcpy(item_strs, &item_end);
+    vector_pushcpy(item_strs, &url.data);
 
     drop(item_data);
+		vector_free(&item_path);
     vector_free(&item_pathdata);
-    vector_free(&item_path);
   }
 
   return items_arg;
@@ -106,7 +104,8 @@ vector_t flatten_url(vector_t* path) {
   return flattened;
 }
 
-vector_t flatten_wikipath(vector_t* path) {
+vector_t
+flatten_wikipath(vector_t* path) {
   vector_t flattened = vector_new(1);
 	vector_stockstr(&flattened, DATA_PATH);
   vector_flatten_strings(path, &flattened, "/", 1);
@@ -114,7 +113,7 @@ vector_t flatten_wikipath(vector_t* path) {
   return flattened;
 }
 
-int render_article(ctx_t* ctx, char** article, vector_t* refs) {
+int render_article(ctx_t* ctx, char** article, int render, vector_t* refs, vector_t* words) {
 	escape_html(article);
 	vector_t vec = vector_from_string(*article);
 
@@ -123,11 +122,15 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 	int escaped=0;
 	int bold=0;
 	int heading=0;
+	
+	unsigned long wc = 0;
 
-	vector_insertstr(&vec, 0, "<p>");
+	if (render) vector_insertstr(&vec, 0, "<p>");
 
 	vector_iterator iter = vector_iterate(&vec);
-	iter.i = strlen("<p>");
+	if (render) iter.i = strlen("<p>");
+	
+	unsigned long word_begin = iter.i;
 	
 	while (vector_next(&iter)) {
 		if (escaped) {
@@ -136,21 +139,41 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 		}
 
 		char x = *(char*)iter.x;
+		
+		if (words && (x==0 || !((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z')))) {
+			unsigned long len = iter.i-1-word_begin;
+			if (len >= WORD_MIN && len <= WORD_MAX) {
+				search_token tok = {.word = heapcpysubstr(vector_get(&vec, word_begin), len), .pos=wc};
+
+				if (heading) tok.score=3;
+				else if (bold) tok.score=2;
+				else tok.score=1;
+
+				vector_pushcpy(words, &tok);
+				wc++;
+			}
+
+			word_begin = iter.i;
+		}
 
 		if (x == '\n' || x == '\r' || x==0) {
 			if (heading) {
 				heading = 0;
-				vector_insertstr(&vec, iter.i-1, "</h2>");
-				iter.i += strlen("</h2>")-1;
+
+				if (render) {
+					vector_insertstr(&vec, iter.i-1, "</h2>");
+					iter.i += strlen("</h2>")-1;
+				}
+
 				continue;
 			}
 
 			if (x==0) {
-				vector_insert_manycpy(&vec, iter.i-1, strlen("</p>")+1, "</p>");
+				if (render) vector_insert_manycpy(&vec, iter.i-1, strlen("</p>")+1, "</p>");
 				break;
-			} else if (!newline) {
+			} else if (!newline && render) {
 				vector_insertstr(&vec, iter.i-1, "</p><p>");
-				iter.i += strlen("</p><p>")-1;
+				iter.i += strlen("</p><p>")-1; //continue skips another
 			}
 
 			newline = 1;
@@ -161,9 +184,11 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 				heading=1;
 				newline=0;
 
-				vector_remove(&vec, iter.i-1);
-				vector_insertstr(&vec, iter.i-1, "<h2>");
-				iter.i += strlen("<h2>")-1;
+				if (render) {
+					vector_remove(&vec, iter.i-1);
+					vector_insertstr(&vec, iter.i-1, "<h2>");
+					iter.i += strlen("<h2>")-1;
+				}
 			}
 
 			continue;
@@ -175,11 +200,12 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 		switch (x) {
 			case '\\': escaped = 1; break;
 			case '*': {
-				if (bold) {
+				if (bold && render) {
 					vector_insertstr(&vec, iter.i, "</b>");
-				} else {
+					iter.i += strlen("</b>")-1;
+				} else if (render) {
 					vector_insertstr(&vec, iter.i-1, "<b>");
-					iter.i += strlen("<b>") + 1;
+					iter.i += strlen("<b>")-1;
 				}
 
 				bold=!bold;
@@ -218,37 +244,44 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 
 					if (refs) vector_pushcpy(refs, &w_path);
 					
-					vector_t outurl = flatten_url(&w_path);
-					vector_t flattened = flatten_path(&w_path);
+					if (render) {
+						vector_t outurl = flatten_url(&w_path);
+						vector_t flattened = flatten_path(&w_path);
 
-					filemap_partial_object obj = filemap_find(&ctx->article_by_name, flattened.data, flattened.length);
-					filemap_field f_data = filemap_cpyfieldref(&ctx->article_fmap, &obj, article_data_i);
+						filemap_partial_object obj = filemap_find(&ctx->article_by_name, flattened.data, flattened.length);
+						filemap_field f_data = filemap_cpyfieldref(&ctx->article_fmap, &obj, article_data_i);
 
-					articledata_t* data = (articledata_t*)f_data.val.data;
+						articledata_t* data = (articledata_t*)f_data.val.data;
 
-					if (f_data.exists && data->ty==article_img) {
-						new_url = heapstr("<a href=\"/wiki/%s\" ><img alt=\"%s\" src=\"/wikisrc/%s\" /></a>", outurl.data,
-								vector_getstr(&w_path, w_path.length-1), outurl.data);
-					} else {
-						new_url = heapstr("<a href=\"/wiki/%s\" >%s</a>", outurl.data,
-								vector_getstr(&w_path, w_path.length-1));
+						if (f_data.exists && data->ty==article_img) {
+							new_url = heapstr("<a href=\"/wiki/%s\" ><img alt=\"%s\" src=\"/wikisrc/%s\" /></a>", outurl.data,
+									vector_getstr(&w_path, w_path.length-1), outurl.data);
+						} else {
+							new_url = heapstr("<a href=\"/wiki/%s\" >%s</a>", outurl.data,
+									vector_getstr(&w_path, w_path.length-1));
+						}
+
+						vector_free(&outurl);
+						vector_free(&flattened);
+
+						if (f_data.exists) 
+							vector_free(&f_data.val);
 					}
 
-					vector_free(&outurl);
-					vector_free(&flattened);
+					if (!refs) vector_free_strings(&w_path);
 
-					if (f_data.exists) 
-						vector_free(&f_data.val);
-
-				} else {
+				} else if (render) {
 					new_url = heapstr("<a href=\"%s\" >%s</a>", url, url);
 				}
 
-				vector_removemany(&vec, remove_from, iter.i-remove_from);
-				vector_insert_manycpy(&vec, remove_from, strlen(new_url), new_url);
-				iter.i = remove_from + strlen(new_url);
+				if (render) {
+					vector_removemany(&vec, remove_from, iter.i-remove_from);
+					vector_insertstr(&vec, remove_from, new_url);
+					iter.i = remove_from + strlen(new_url);
 
-				drop(new_url);
+					drop(new_url);
+				}
+
 				drop(url);
 				
 				break;
@@ -265,6 +298,7 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 
 				vector_removemany(&vec, iter.i-1, strlen("```"));
 				vector_insertstr(&vec, iter.i-1, "</pre>");
+				iter.i += strlen("</pre>") - strlen("```") - 1;
 				break;
 			}
 		}
@@ -274,6 +308,188 @@ int render_article(ctx_t* ctx, char** article, vector_t* refs) {
 	return 0;
 }
 
+void update_article_keywords(ctx_t* ctx, vector_t* add_keywords, vector_t* remove_keywords, uint64_t idx) {
+	int adding = remove_keywords==NULL; //remove first
+
+	vector_iterator iter = vector_iterate(adding ? add_keywords : remove_keywords);
+	while (1) {
+		if (!vector_next(&iter)) {
+			if (adding || !add_keywords) break;
+			
+			adding = 1;
+			iter=vector_iterate(add_keywords);
+			continue;
+		}
+
+		search_token* tok = iter.x;
+
+		if (!adding && add_keywords) {
+			unsigned long pos = vector_search(add_keywords, tok);
+			if (pos>0) {
+				vector_remove(add_keywords, pos-1);
+				continue;
+			}
+		}
+
+		article_tok atok = {.article=idx, .pos=tok->pos, .score=tok->score};
+
+		locktable_lock_key(&ctx->word_lock, tok->word, strlen(tok->word));
+		filemap_partial_object* partial_ref = map_find(&ctx->wordi_cache, &tok->word);
+		filemap_partial_object partial;
+
+		if (!partial_ref) {
+			partial = filemap_find(&ctx->words, tok->word, strlen(tok->word));
+
+			char* key = heapcpystr(tok->word);
+			
+			if (!partial.exists) {
+				if (!adding) {
+					locktable_unlock_key(&ctx->word_lock, tok->word, strlen(tok->word));
+					continue;
+				}
+				
+			  word_index wid;
+			  memset(&wid, 0, sizeof(word_index));
+				wid.tok[0] = atok;
+
+			  filemap_object obj = filemap_push(&ctx->wordi_fmap,
+							    (char*[]){tok->word, (char*)&wid},
+							    (uint64_t[]){strlen(tok->word), sizeof(word_index)});
+
+			  partial = filemap_insert(&ctx->words, &obj);
+			  map_insertcpy(&ctx->wordi_cache, &key, &partial);
+				
+				locktable_unlock_key(&ctx->word_lock, tok->word, strlen(tok->word));
+			  continue;
+			} else {
+				map_insertcpy(&ctx->wordi_cache, &key, &partial);
+			}
+		} else {
+			partial = *partial_ref;
+		}
+
+		filemap_field wid_field = filemap_cpyfield(&ctx->wordi_fmap, &partial, 1);
+		word_index* wid = (word_index*)wid_field.val.data;
+
+		article_tok* stok=NULL;
+		article_tok* itok = wid->tok;
+
+		for (unsigned i=0; i<WORD_LIMIT; i++) {
+			if (itok->score==0) break;
+			if (itok->article == atok.article) {
+				stok = itok;
+				break;
+			}
+
+			itok++;
+		}
+
+		//wildcard match all words if article matches
+		if (!adding) {
+			stok->score = 0;
+		} else {
+			//either revise current score/pos or add new
+			if (stok && stok->score < tok->score) *stok = atok;
+			else if (itok->score < atok.score) *itok = atok;
+		}
+		
+		filemap_set(&ctx->wordi_fmap, &partial, (update_t[]){{.field=1, .len=sizeof(word_index), .new=wid_field.val.data}}, 1);
+		vector_free(&wid_field.val);
+
+		locktable_unlock_key(&ctx->word_lock, tok->word, strlen(tok->word));
+	}
+}
+
+void article_words_free(vector_t* toks) {
+	vector_iterator iter = vector_iterate(toks);
+	while (vector_next(&iter)) {
+		search_token* stok = iter.x;
+		drop(stok->word);
+	}
+
+	vector_free(toks);
+}
+
+int article_search(ctx_t* ctx, char* str, vector_t* res) {
+	char* word_begin=str;
+	unsigned wc=0;
+
+	while (str) {
+		char x = *str;
+		if (!((x >= 'a' && x <= 'z') || (x >= 'A' && x <= 'Z'))) {
+			unsigned long len = str-word_begin;
+
+			if (wc == QUERY_MAX) {
+				return 0;
+			}
+			
+			if (len >= WORD_MIN && len <= WORD_MAX) {
+				char* word = heapcpysubstr(word_begin, len);
+				
+				filemap_partial_object* partial_ref = map_find(&ctx->wordi_cache, &word);
+				filemap_partial_object partial;
+
+				if (!partial_ref) {
+					partial = filemap_find(&ctx->words, word, strlen(word));
+					drop(word);
+
+					if (!partial.exists) continue;
+				} else {
+					partial = *partial_ref;
+					drop(word);
+				}
+
+				filemap_field wordi_field = filemap_cpyfield(&ctx->wordi_fmap, &partial, 1);
+				word_index* wordi = (word_index*)wordi_field.val.data;
+
+				article_tok* tok = wordi->tok;
+
+				while (tok->score!=0) {
+					vector_iterator iter = vector_iterate(res);
+
+					int found=0;
+					while (vector_next(&iter)) {
+						article_tok* rtok = iter.x;
+						
+						//same article
+						if (rtok->article == tok->article) {
+							int diff = (long)rtok->pos - (long)tok->pos;
+							//adjacent words double, otherwise assume "max distance" and average
+							if (diff >= -1 && diff <= 1) {
+								rtok->score = rtok->score + tok->score;
+							} else {
+								rtok->score = (rtok->score + tok->score)/2;
+							}
+
+							found=1;
+							break;
+						}
+					}
+
+					if (!found) {
+						vector_pushcpy(res, tok);
+					}
+
+					tok++;
+				}
+
+				vector_free(&wordi_field.val);
+
+				wc++;
+			}
+
+			word_begin = str;
+		}
+
+		str++;
+	}
+	
+	//sort
+	vector_sort_inplace(res, offsetof(article_tok, score), sizeof(unsigned char));
+	return 1;
+}
+
+//(very) similar structure
 void update_article_refs(ctx_t* ctx, vector_t* flattened, vector_t* add_refs, vector_t* remove_refs, uint64_t idx) {
 	int removing=!add_refs;
 
@@ -290,9 +506,9 @@ void update_article_refs(ctx_t* ctx, vector_t* flattened, vector_t* add_refs, ve
 
 		if (!removing && remove_refs) {
 			//if in both add and remove, remove from remove_refs and skip
-			uint64_t* elem = vector_search(remove_refs, iter.x);
+			unsigned long elem = vector_search(remove_refs, iter.x);
 			if (elem) {
-				vector_remove_element(remove_refs, (char*)elem);
+				vector_remove(remove_refs, elem-1);
 				continue;
 			}
 		}
@@ -326,10 +542,10 @@ void update_article_refs(ctx_t* ctx, vector_t* flattened, vector_t* add_refs, ve
 					filemap_delete_object(&ctx->article_fmap, &ref);
 				} else {
 					vector_t ref_by = {.data=ref.fields[article_items_i], .length=data->referenced_by, .size=8};
-					uint64_t* by = vector_search(&ref_by, &idx);
+					unsigned long by = vector_search(&ref_by, &idx);
 
 					if (by) {
-						vector_remove_element(&ref_by, (char*)by);
+						vector_remove(&ref_by, by-1);
 
 						ref.fields[article_items_i] = ref_by.data;
 						ref.lengths[article_items_i] -= 8;
@@ -429,10 +645,13 @@ void rerender_articles(ctx_t* ctx, vector_t* articles, vector_t* from, char* to)
 		vector_t filepath = flatten_wikipath(&path);
 
 		text_t txt = txt_new(filepath.data);
-		read_txt(&txt, 0);
+		read_txt(&txt, 0, 0);
 
 		if (from && to) {
 			diff_t d = {.additions=vector_new(sizeof(add_t)), .deletions=vector_new(sizeof(del_t))};
+			d.author = 0;
+			d.time = (uint64_t)time(NULL);
+
 			vector_t url_strs = vector_new(sizeof(char*));
 
 			//search for wiki links and replace from with to
@@ -474,16 +693,17 @@ void rerender_articles(ctx_t* ctx, vector_t* articles, vector_t* from, char* to)
 
 		char* html_cache = heapcpystr(txt.current);
 
-		if (render_article(ctx, &html_cache, NULL)==0) {
+		if (render_article(ctx, &html_cache, 1, NULL, NULL)==0) {
 			filemap_object new_obj = filemap_push_updated(&ctx->article_fmap, &obj, (update_t[]){{.field=article_html_i, .new=html_cache, .len=strlen(html_cache)+1}}, 1);
 
 			filemap_list_update(&ctx->article_id, &partial, &new_obj);
 			filemap_delete_object(&ctx->article_fmap, &obj);
 			
-			filemap_updated_free(&ctx->article_fmap, &new_obj);
+			filemap_updated_free(&new_obj);
 		}
 
 		unlock_article(ctx, flattened.data, flattened.length);
+		vector_free(&flattened);
 
 		txt_free(&txt);
 
@@ -494,8 +714,7 @@ void rerender_articles(ctx_t* ctx, vector_t* articles, vector_t* from, char* to)
 }
 
 int article_lock_groups(ctx_t* ctx, vector_t* path, vector_t* flattened, vector_t* groups) {
-	vector_iterator iter = vector_iterate(path);
-	iter.rev = 1;
+	vector_iterator iter = vector_iterate_rev(path);
 
 	unsigned long key_len = flattened->length;
 
@@ -509,14 +728,13 @@ int article_lock_groups(ctx_t* ctx, vector_t* path, vector_t* flattened, vector_
 		filemap_partial_object group_ref =
 				filemap_find(&ctx->article_by_name, flattened->data, key_len);
 		filemap_partial_object group = filemap_deref(&ctx->article_id, &group_ref);
-
-		if (group.exists) {
-			filemap_field data = filemap_cpyfield(&ctx->article_fmap, &group, article_data_i);
+		filemap_field data = filemap_cpyfield(&ctx->article_fmap, &group, article_data_i);
+		
+		if (data.exists) {
 			if (((articledata_t*)data.val.data)->ty != article_group) {
 				vector_free(&data.val);
 
-				vector_iterator iter_unlock = vector_iterate(path);
-				iter_unlock.rev = 1;
+				vector_iterator iter_unlock = vector_iterate_rev(path);
 
 				key_len = flattened->length;
 
@@ -541,35 +759,35 @@ int article_lock_groups(ctx_t* ctx, vector_t* path, vector_t* flattened, vector_
 
 void article_group_insert(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t* flattened, uint64_t user_idx, filemap_partial_object* item) {
 	vector_iterator iter = vector_iterate(groups);
-	iter.rev = 1;
 
+	filemap_partial_object prev = *item;
+	
 	unsigned long key_len = flattened->length;
 
 	while (vector_next(&iter)) {
 		char last = iter.i == 1;
 
-		unsigned long segment_len = strlen(vector_getstr(path, iter.i-1));
+		unsigned long segment_len = strlen(vector_getstr(path, path->length-iter.i));
 
 		key_len -= segment_len + 1;  //\0 is a delimeter
 
 		filemap_partial_object* new_group = iter.x;
 
 		if (!new_group->exists) {
-			articledata_t groupdata = {.path_length = path->length - iter.i,
+			articledata_t groupdata = {.path_length = path->length-iter.i,
 																	.ty = article_group, .items = 1,
-																	.contributors = last};
+																	.contributors = last,
+																	.edit_time=(uint64_t)time(NULL)};
 
-			filemap_object obj = filemap_push(
-					&ctx->article_fmap,
-
-					(char*[]){(char*)&groupdata, (char*)&item->index, flattened->data,
+			filemap_object obj = filemap_push(&ctx->article_fmap,
+						(char*[]){(char*)&groupdata, (char*)&prev.index, flattened->data,
 						last ? (char*)&user_idx : NULL, NULL},
 
 					(uint64_t[]){sizeof(articledata_t), 8, key_len, last ? 8 : 0, 0});
 
-			*new_group = filemap_add(&ctx->article_id, &obj);
+			prev = filemap_add(&ctx->article_id, &obj);
 
-			filemap_object obj_ref = filemap_index_obj(&obj, new_group);
+			filemap_object obj_ref = filemap_index_obj(&obj, &prev);
 			filemap_insert(&ctx->article_by_name, &obj_ref);
 
 		} else {
@@ -586,12 +804,12 @@ void article_group_insert(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 												.size = sizeof(uint64_t),
 												.length = groupdata->contributors};
 			
-			int exists = vector_search(&items, &item->index)!=NULL;
-			int user_exists = !last || vector_search(&contribs, &user_idx)!=NULL;
+			int exists = vector_search(&items, &prev.index)!=0;
+			int user_exists = !last || vector_search(&contribs, &user_idx)!=0;
 			
 			if (!exists || !user_exists) {
 				if (!exists) {
-					filemap_push_field(&obj, article_items_i, 8, &item->index);
+					filemap_push_field(&obj, article_items_i, 8, &prev.index);
 					groupdata->items++;
 				} 
 
@@ -607,22 +825,21 @@ void article_group_insert(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 			}
 
 			filemap_object_free(&ctx->article_fmap, &obj);
+			
+			prev = *new_group;
 		}
 
 		unlock_article(ctx, flattened->data, key_len);
-
-		item = new_group;
 	}
 }
 
 void article_group_remove(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t* flattened, filemap_partial_object* item) {
 	vector_iterator iter = vector_iterate(groups);
-	iter.rev = 1;
 
 	unsigned long key_len = flattened->length;
 
 	while (vector_next(&iter)) {
-		unsigned long segment_len = strlen(vector_getstr(path, iter.i-1));
+		unsigned long segment_len = strlen(vector_getstr(path, path->length-iter.i));
 		key_len -= segment_len + 1;
 
 		filemap_partial_object* group = iter.x;
@@ -637,10 +854,10 @@ void article_group_remove(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 												.size = sizeof(uint64_t),
 												.length = groupdata->items};
 			
-			char* item_exists = vector_search(&items, &item->index);
+			unsigned long item_exists = vector_search(&items, &item->index);
 			
 			if (item_exists) {
-				vector_remove_element(&items, item_exists);
+				vector_remove(&items, item_exists-1);
 				obj.fields[article_items_i] = items.data;
 				obj.lengths[article_items_i] -= 8;
 				
@@ -665,6 +882,31 @@ void article_group_remove(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 
 		unlock_article(ctx, flattened->data, key_len);
 	}
+}
+
+uint64_t path_abc_order(char* name) {
+	//alphabetical sorting - 2^5 = 32 max for each letter, store up to 13 "letters"
+	uint64_t val = 0; //longer values are first
+
+	unsigned i=0;
+	while (name && i<13) {
+		int x = *name - 'a';
+		if (*name-'A' < x) x = *name-'A';
+
+		if (x<0 || x > 24) {
+			name++;
+			continue;
+		}
+		
+		int shift = 64 - 5*(i+1);
+		if (shift>0) val += (uint64_t)x << shift;
+		else val += (uint64_t)x >> shift;
+
+		name++;
+		i++;
+	}
+
+	return val;
 }
 
 int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
@@ -701,9 +943,12 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 	article_group_insert(ctx, &groups, path, flattened, user_idx, article);
 	vector_free(&groups);
 
+	uint64_t creation_time = (uint64_t)time(NULL);
+
 	articledata_t data = {
 			.path_length = path->length, .ty = ty,
-			.referenced_by = referenced_by.length, .contributors=1};
+			.referenced_by = referenced_by.length,
+			.contributors=1, .edit_time=creation_time};
 
 	filemap_object text = filemap_push(
 			&ctx->article_fmap,
@@ -720,6 +965,11 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 	filemap_object text_ref = filemap_index_obj(&text, article);
 
 	filemap_insert(&ctx->article_by_name, &text_ref);
+
+	filemap_ordered_insert(&ctx->articles_newest, UINT64_MAX-creation_time, &text_ref);
+
+	uint64_t abc_order = path_abc_order(vector_getstr(path, path->length-1));
+	filemap_ordered_insert(&ctx->articles_alphabetical, abc_order, &text_ref);
 
 	rerender_articles(ctx, &referenced_by, NULL, NULL);
 	vector_free(&referenced_by);
@@ -967,9 +1217,9 @@ void route(session_t* session, request* req) {
         return;
       }
 
+			int setperms = (get_perms(session) & perms_admin) && !(((userdata_t*)user.fields[user_data_i])->perms & perms_admin);
       respond_template(session, 200, "profile", user.fields[user_name_i],
-                       get_perms(session) & perms_admin, user.fields[user_name_i],
-                       user.fields[user_bio_i]);
+                       setperms, user.fields[user_name_i], user.fields[user_bio_i]);
     }
 
     filemap_object_free(&session->ctx->user_fmap, &user);
@@ -1188,9 +1438,8 @@ void route(session_t* session, request* req) {
     EVP_DigestFinal_ex(session->ctx->digest_ctx, data->password_hash, NULL);
 
     // no length changes, refer to old data and updated userdata_t
-    filemap_object new = filemap_push(&session->ctx->user_fmap, user.fields, user.lengths);
-		filemap_list_update(&session->ctx->user_id, &session->user_ses->user, &new);
-		filemap_delete_object(&session->ctx->user_fmap, &user);
+    filemap_set(&session->ctx->user_fmap, &session->user_ses->user,
+			(update_t[]){{.field=user_data_i, .len=sizeof(userdata_t), .new=(char*)data}}, 1);
 
     respond_template(session, 200, "account", user.fields[user_name_i], 1,
                      "Changed password successfully", user.fields[user_name_i],
@@ -1252,8 +1501,9 @@ void route(session_t* session, request* req) {
 
 		char* html_cache = heapcpystr(content);
 		vector_t refs = vector_new(sizeof(vector_t));
+		vector_t keywords = vector_new(sizeof(search_token));
 
-		unsigned long col = render_article(session->ctx, &html_cache, &refs);
+		unsigned long col = render_article(session->ctx, &html_cache, 1, &refs, &keywords);
 
 		if (col!=0) {
 			char* err = heapstr("Syntax error at column %lu", col);
@@ -1265,6 +1515,7 @@ void route(session_t* session, request* req) {
 			drop(html_cache);
 			refs_free(&refs);
 
+			article_words_free(&keywords);
 			vector_free_strings(&path);
 			vector_free(&params);
 			return;
@@ -1289,6 +1540,7 @@ void route(session_t* session, request* req) {
 			drop(html_cache);
 			refs_free(&refs);
 
+			article_words_free(&keywords);
 			vector_free_strings(&path);
 			vector_free(&flattened);
 			vector_free(&params);
@@ -1299,17 +1551,32 @@ void route(session_t* session, request* req) {
 
 		update_article_refs(session->ctx, &flattened, &refs, NULL, article.index);
 		refs_free(&refs);
+
+		update_article_keywords(session->ctx, &keywords, NULL, article.index);
+		article_words_free(&keywords);
 		
     // display/file path
     vector_t out_path = make_path(&path);
 
 		//add diff
-		diff_t d = {.additions = vector_new(sizeof(add_t)),
-			.deletions = vector_new(sizeof(del_t))};
-		vector_pushcpy(&d.additions, &(add_t){.pos = 0, .txt = content});
+		diff_t d;
 
 		text_t txt = txt_new(out_path.data);
+		read_txt(&txt, 0, 0);
+		if (txt.current) {
+			d = find_changes(txt.current, content);
+		} else {
+			d = (diff_t){.additions = vector_new(sizeof(add_t)),
+				.deletions = vector_new(sizeof(del_t))};
+
+			vector_pushcpy(&d.additions, &(add_t){.pos = 0, .txt = content});
+		}
+
+		d.author = session->user_ses->user.index;
+		d.time = (uint64_t)time(NULL);
+
 		add_diff(&txt, &d, content);
+		txt_free(&txt);
 
 		vector_free(&d.additions);
 		vector_free(&d.deletions);
@@ -1421,11 +1688,6 @@ void route(session_t* session, request* req) {
     vector_free(&params);
 
 	} else if (strcmp(base, "edit")==0 && req->method==GET) {
-		if (!(get_perms(session) & perms_edit_article)) {
-      respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
-      return;
-    }
-		
 		req_wiki_path(req);
 		vector_t flattened = flatten_path(&req->path);
 
@@ -1436,11 +1698,13 @@ void route(session_t* session, request* req) {
 			return;
 		}
 
-		vector_t data = filemap_cpyfieldref(&session->ctx->article_fmap, &ref, article_data_i).val;
-		if (((articledata_t*)data.data)->ty != article_text) {
+		articledata_t* data =
+			(articledata_t*)filemap_cpyfieldref(&session->ctx->article_fmap, &ref, article_data_i).val.data;
+
+		if (data->ty != article_text) {
 			respond_template(session, 200, "edit", "Edit article", 1, 1, "Cannot edit a non-textual article", "", "", "");
 			vector_free(&flattened);
-			vector_free(&data);
+			drop(data);
 			return;
 		}
 
@@ -1455,12 +1719,13 @@ void route(session_t* session, request* req) {
 		vector_free(&flattened);
 		vector_free(&wpath);
 		vector_free(&path);
-		vector_free(&data);
+		drop(data);
 
 	} else if (strcmp(base, "edit")==0 && req->method==POST) {
     mtx_lock(&session->user_ses->lock);
     
-    if (!(get_perms(session) & perms_edit_article)) {
+		permissions_t perms = get_perms(session);
+    if (!(perms & perms_edit_article)) {
       respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
       mtx_unlock(&session->user_ses->lock);
       return;
@@ -1519,15 +1784,31 @@ void route(session_t* session, request* req) {
 			return;
 		}
 
+		vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
+		
+		if (!(perms & perms_admin) && vector_search(&contribs, &session->user_ses->user.index)==0) {
+      respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
+
+      mtx_unlock(&session->user_ses->lock);
+			filemap_object_free(&session->ctx->article_fmap, &obj);
+			unlock_article(session->ctx, flattened.data, flattened.length);
+
+      vector_free_strings(&new_path);
+      vector_free_strings(&path);
+      vector_free(&params);
+			return;
+		}
+
 		int path_change = vector_cmpstr(&path, &new_path)!=0;
 
 		filemap_partial_object new_article;
-		filemap_object new_article_obj;
 
 		vector_t new_referenced_by = vector_new(sizeof(uint64_t));
 		vector_t new_groups;
 
 		if (path_change) {
+			filemap_object new_article_obj;
+
 			lock_article(session->ctx, new_flattened.data, new_flattened.length);
 
 			filemap_partial_object new_article_ref =
@@ -1537,26 +1818,27 @@ void route(session_t* session, request* req) {
 			new_article_obj = filemap_cpy(&session->ctx->article_fmap, &new_article);
 
 			int group_res;
-			articledata_t* new_data;
+			articledata_t new_data;
 
 			//shorten error handling...
 			if (!new_article.exists) {
 				new_groups = vector_new(sizeof(filemap_partial_object));
 				group_res = article_lock_groups(session->ctx, &new_path, &new_flattened, &new_groups);
 			} else {
-				new_data = (articledata_t*)new_article_obj.fields[article_data_i];
-				if (new_data->ty == article_dead)
+				new_data = *(articledata_t*)new_article_obj.fields[article_data_i];
+				filemap_object_free(&session->ctx->article_fmap, &new_article_obj);
+
+				if (new_data.ty == article_dead)
 					vector_stockcpy(&new_referenced_by, data->referenced_by, new_article_obj.fields[article_items_i]);
 			}
 
-			if ((new_article.exists && new_data->ty!=article_dead) || !group_res) {
+			if ((new_article.exists && new_data.ty!=article_dead) || !group_res) {
 				respond_template(session, 200, "edit", "Edit article", 1, 1, "New path is already taken", //TODO: which segment
 						path_str, new_path_str, content);
 
 				mtx_unlock(&session->user_ses->lock);
 
 				filemap_object_free(&session->ctx->article_fmap, &obj);
-				if (new_article.exists) filemap_object_free(&session->ctx->article_fmap, &new_article_obj);
 
 				unlock_article(session->ctx, flattened.data, flattened.length);
 				unlock_article(session->ctx, new_flattened.data, new_flattened.length);
@@ -1571,7 +1853,9 @@ void route(session_t* session, request* req) {
 		char* html_cache = heapcpystr(content);
 		vector_t refs = vector_new(sizeof(vector_t));
 
-		unsigned long col = render_article(session->ctx, &html_cache, &refs);
+		vector_t keywords = vector_new(sizeof(search_token));
+
+		unsigned long col = render_article(session->ctx, &html_cache, 1, &refs, &keywords);
 
 		if (col!=0) {
 			char* err = heapstr("Syntax error at column %lu", col);
@@ -1585,30 +1869,22 @@ void route(session_t* session, request* req) {
 			if (path_change)
 				unlock_article(session->ctx, new_flattened.data, new_flattened.length);
 
-			if (path_change && new_article.exists)
-				filemap_object_free(&session->ctx->article_fmap, &new_article_obj);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 
 			drop(html_cache);
 			refs_free(&refs);
 			vector_free(&new_referenced_by);
 
+			article_words_free(&keywords);
       vector_free_strings(&new_path);
 			vector_free_strings(&path);
 			vector_free(&params);
 			return;
 		}
 
-		//1. if path change, remove from old dir and unnecessary folders, add into new
-		//2. if path change, use referenced by to find and replace references between brackets
-		// (remember to replace in article itself as well, bc those are ignored)
-		//3. find disjoint union of references if content changed and update referenced by
-		//4. find changes, add diff
-		//5. change content
-
 		vector_t wpath = flatten_wikipath(&path);
 		text_t txt = txt_new(wpath.data);
-		read_txt(&txt, 0);
+		read_txt(&txt, 0, 0);
 
 		int content_change = strcmp(txt.current, content)!=0;
 
@@ -1616,33 +1892,46 @@ void route(session_t* session, request* req) {
 
 		//revise refs / add diff
 		if (content_change) {
-			vector_t old_refs = find_refs(txt.current, NULL);
+			vector_t old_refs = vector_new(sizeof(vector_t));
+			vector_t old_keywords = vector_new(sizeof(search_token));
+
+			render_article(session->ctx, &txt.current, 0, &old_refs, &old_keywords);
 			update_article_refs(session->ctx, flattened_path,
 													&refs, &old_refs, article.index);
+
 			refs_free(&old_refs);
 
+			update_article_keywords(session->ctx, &keywords, &old_keywords, article.index);
+			article_words_free(&old_keywords);
+			
 			diff_t d = find_changes(txt.current, content);
-			if (path_change) {
-				vector_t new_wpath = flatten_wikipath(&new_path);
+			d.author = session->user_ses->user.index;
+			d.time = (uint64_t)time(NULL);
 
-				text_t new_txt = txt_new(new_wpath.data);
-				add_diff(&new_txt, &d, content);
-				vector_free(&new_wpath);
-			} else {
-				add_diff(&txt, &d, content);
-			}
+			add_diff(&txt, &d, content);
 
 			diff_free(&d);
+		}
+
+		article_words_free(&keywords);
+		
+		//move diff file
+		if (path_change) {
+			vector_t new_wpath = make_path(&new_path);
+			rename(wpath.data, new_wpath.data);
+			
+			vector_free(&new_wpath);
 		}
 		
 		//update object (if at all)
 		filemap_object new_obj;
+		filemap_object idx_obj;
+
 		if (content_change || path_change) {
-			vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
-			
-			if (vector_search(&contribs, &session->user_ses->user.index)==0) {
-				filemap_push_field(&obj, article_contrib_i, 8, &session->user_ses->user.index);
-			}
+
+			filemap_ordered_remove_id(&session->ctx->articles_newest, data->edit_time, &article);
+
+			data->edit_time = (uint64_t)time(NULL);
 
 			new_obj = filemap_push_updated(&session->ctx->article_fmap, &obj,
 				(update_t[]){{.field=article_path_i, .new=flattened_path->data, .len=flattened_path->length},
@@ -1650,9 +1939,13 @@ void route(session_t* session, request* req) {
 
 			if (path_change) {
 				new_article = filemap_add(&session->ctx->article_id, &new_obj);
+				idx_obj = filemap_index_obj(&new_obj, &new_article);
 			} else {
 				filemap_list_update(&session->ctx->article_id, &article, &new_obj);
+				idx_obj = filemap_index_obj(&new_obj, &new_article);
 			}
+
+			filemap_ordered_insert(&session->ctx->articles_newest, data->edit_time, &idx_obj);
 
 			filemap_delete_object(&session->ctx->article_fmap, &obj);
 		}
@@ -1660,7 +1953,9 @@ void route(session_t* session, request* req) {
 		vector_t url;
 
 		if (path_change) {
-			filemap_object idx_obj = filemap_index_obj(&new_obj, &new_article);
+			filemap_ordered_remove_id(&session->ctx->articles_alphabetical,
+				path_abc_order(vector_getstr(&path, path.length-1)), &article);
+
 			filemap_insert(&session->ctx->article_by_name, &idx_obj);
 
 			article_group_insert(session->ctx, &new_groups, &new_path, &new_flattened,
@@ -1677,6 +1972,9 @@ void route(session_t* session, request* req) {
 			url = flatten_url(&new_path);
 			vector_t referenced_by = {.data=obj.fields[article_items_i], .size=8, .length=data->referenced_by};
 			rerender_articles(session->ctx, &referenced_by, &path, url.data);
+
+			uint64_t abc_order = path_abc_order(vector_getstr(&new_path, new_path.length-1));
+			filemap_ordered_insert(&session->ctx->articles_alphabetical, abc_order, &idx_obj);
 
 			vector_free(&referenced_by);
 		} else {
@@ -1701,12 +1999,10 @@ void route(session_t* session, request* req) {
 		refs_free(&refs);
 		txt_free(&txt);
 
-		if (path_change && new_article.exists)
-			filemap_object_free(&session->ctx->article_fmap, &new_article_obj);
 		filemap_object_free(&session->ctx->article_fmap, &obj);
 		
 		if (path_change || content_change)
-			filemap_updated_free(&session->ctx->article_fmap, &new_obj);
+			filemap_updated_free(&new_obj);
 		
     vector_free_strings(&path);
 		vector_free_strings(&new_path);
@@ -1720,6 +2016,149 @@ void route(session_t* session, request* req) {
 		
     vector_free(&params);
 		
+	//nearly identical
+	} else if (strcmp(base, "setcontrib")==0 && req->method == POST) {
+		mtx_lock(&session->user_ses->lock);
+
+		permissions_t perms = get_perms(session);
+
+		if (!(perms & perms_edit_article)) {
+			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
+			mtx_unlock(&session->user_ses->lock);
+			return;
+		}
+
+		vector_t params = query_find(&req->query, (char*[]){"path", "contributor", "add"}, 3, 1);
+		if (params.length != 3) {
+			respond_error(session, 400, "Path and new contributor not provided");
+			vector_free(&params);
+			return;
+		}
+
+		char* path = vector_getstr(&params, 0);
+		char* user = vector_getstr(&params, 1);
+		int add = *vector_getstr(&params, 2) == 'a'; //"add"[0] == 'a'
+
+		vector_t split = vector_split_str(path, "/");
+		vector_t flattened = flatten_path(&split);
+
+		lock_article(session->ctx, flattened.data, flattened.length);
+
+		filemap_partial_object article_ref = filemap_find(&session->ctx->article_by_name, flattened.data, flattened.length);
+		filemap_partial_object article = filemap_deref(&session->ctx->article_id, &article_ref);
+		filemap_object obj = filemap_cpy(&session->ctx->article_fmap, &article);
+
+		articledata_t* data = obj.exists ? (articledata_t*)obj.fields[article_data_i] : NULL;
+		if (!obj.exists || data->ty != article_text) {
+			respond_template(session, 200, "edit", "Edit article", 1, 1,
+					"Article does not exist / is not a text", path, path, "");
+
+			mtx_unlock(&session->user_ses->lock);
+			filemap_object_free(&session->ctx->article_fmap, &obj);
+			unlock_article(session->ctx, flattened.data, flattened.length);
+
+			vector_free(&params);
+			vector_free(&split);
+			vector_free(&flattened);
+
+			return;
+		}
+
+		vector_t wikipath = flatten_wikipath(&split);
+		cached* cache = article_current(session->ctx, &wikipath);
+		vector_free(&wikipath);
+
+		filemap_partial_object user_ref = filemap_find(&session->ctx->user_by_name, user, strlen(user)+1);
+		filemap_partial_object user_deref = filemap_deref(&session->ctx->user_id, &user_ref);
+		filemap_object user_obj = filemap_cpy(&session->ctx->user_fmap, &user_deref);
+
+		if (!user_obj.exists) {
+			respond_template(session, 200, "edit", "Edit article", 1, 1,
+					"User does not exist", path, path, cache->data);
+			ctx_cache_done(session->ctx, cache, wikipath.data);
+
+			mtx_unlock(&session->user_ses->lock);
+			filemap_object_free(&session->ctx->user_fmap, &user_obj);
+			filemap_object_free(&session->ctx->article_fmap, &obj);
+			unlock_article(session->ctx, flattened.data, flattened.length);
+
+			vector_free(&params);
+			vector_free(&split);
+			vector_free(&flattened);
+
+			return;
+		}
+
+		vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
+
+		if (!(perms & perms_admin) && vector_search(&contribs, &session->user_ses->user.index)==0) {
+			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
+			ctx_cache_done(session->ctx, cache, wikipath.data);
+
+			mtx_unlock(&session->user_ses->lock);
+			filemap_object_free(&session->ctx->article_fmap, &obj);
+			unlock_article(session->ctx, flattened.data, flattened.length);
+
+			vector_free(&params);
+			vector_free(&split);
+			vector_free(&flattened);
+
+			return;
+		}
+
+		unsigned long item = vector_search(&contribs, &user_deref.index);
+		if (add == item>0) {
+			respond_template(session, 200, "edit", "Edit article", 1, 1,
+					add ? "That user is already a contributor" : "That user is not a contributor",
+					path, path, cache->data);
+
+			ctx_cache_done(session->ctx, cache, wikipath.data);
+
+			mtx_unlock(&session->user_ses->lock);
+			filemap_object_free(&session->ctx->article_fmap, &obj);
+			filemap_object_free(&session->ctx->user_fmap, &user_obj);
+			unlock_article(session->ctx, flattened.data, flattened.length);
+
+			vector_free(&params);
+			vector_free(&split);
+			vector_free(&flattened);
+
+			return;
+		}
+
+		if (add) {
+			filemap_push_field(&obj, article_contrib_i, 8, &user_deref.index);
+			data->contributors++;
+		} else {
+			vector_remove(&contribs, item-1);
+			obj.fields[article_contrib_i] = contribs.data;
+			obj.lengths[article_contrib_i] -= 8;
+			data->contributors--;
+		}
+
+		filemap_object new_obj = filemap_push(&session->ctx->article_fmap, obj.fields, obj.lengths);
+		filemap_list_update(&session->ctx->article_id, &article, &new_obj);
+		filemap_delete_object(&session->ctx->article_fmap, &obj);
+
+		mtx_unlock(&session->user_ses->lock);
+		unlock_article(session->ctx, flattened.data, flattened.length);
+
+		vector_t redir = vector_new(1);
+		vector_stockstr(&redir, "/edit/");
+		vector_flatten_strings(&split, &redir, "/", 1);
+
+		respond_redirect(session, redir.data);
+
+		vector_free(&redir);
+		ctx_cache_done(session->ctx, cache, wikipath.data);
+
+		filemap_object_free(&session->ctx->article_fmap, &obj);
+		filemap_object_free(&session->ctx->user_fmap, &user_obj);
+
+		vector_free(&params);
+		vector_free(&split);
+		vector_free(&flattened);
+
 	} else if (strcmp(base, "delete")==0 && req->method==POST) {
 		if (!(get_perms(session) & perms_delete_article)) {
 			respond_error(session, 500, "You can't delete stuff");
@@ -1738,20 +2177,37 @@ void route(session_t* session, request* req) {
 		if (!obj.exists) {
 			respond_error(session, 404, "Article does not exist");
 			unlock_article(session->ctx, flattened.data, flattened.length);
+			
+			vector_free(&flattened);
 			return;
 		}
 		
 		articledata_t* data = (articledata_t*)obj.fields[article_data_i];
+
+		vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
+		if (vector_search(&contribs, &session->user_ses->user.index)==0) {
+			respond_error(session, 500, "You aren't a listed contributor.");
+			unlock_article(session->ctx, flattened.data, flattened.length);
+			
+			filemap_object_free(&session->ctx->article_fmap, &obj);
+			vector_free(&flattened);
+			return;
+		}
 		
 		if (data->ty != article_text && data->ty != article_img) {
 			respond_error(session, 422, "Article is not a text article, perhaps it is already dead");
 			unlock_article(session->ctx, flattened.data, flattened.length);
+			
 			filemap_object_free(&session->ctx->article_fmap, &obj);
+			vector_free(&flattened);
 			return;
 		}
 
 		int img = data->ty == article_img;
 		data->ty = article_dead;
+		
+		vector_t wpath = flatten_wikipath(&req->path);
+		ctx_cache_remove(session->ctx, wpath.data);
 		
 		filemap_object new_obj = filemap_push(&session->ctx->article_fmap, obj.fields, obj.lengths);
 		filemap_list_update(&session->ctx->article_id, &article, &new_obj);
@@ -1764,14 +2220,28 @@ void route(session_t* session, request* req) {
 		article_group_remove(session->ctx, &groups, &req->path, &flattened, &article);
 		vector_free(&groups);
 
-		vector_t wpath = flatten_wikipath(&req->path);
-		ctx_cache_remove(session->ctx, wpath.data);
-		
+		//remove from alphabetical listing
+		filemap_ordered_remove_id(&session->ctx->articles_alphabetical, path_abc_order(vector_getstr(&req->path, req->path.length-1)), &article);
+
 		if (!img) {
 			text_t txt = txt_new(wpath.data);
-			read_txt(&txt, 0);
+			read_txt(&txt, 0, 0);
+
+			vector_t refs = vector_new(sizeof(vector_t));
+			vector_t keywords = vector_new(sizeof(search_token));
+
+			if (render_article(session->ctx, &txt.current, 0, &refs, &keywords)) {
+				update_article_refs(session->ctx, &flattened, NULL, &refs, article.index);
+				update_article_keywords(session->ctx, NULL, &keywords, article.index);
+			}
+
+			refs_free(&refs);
+			article_words_free(&keywords);
 
 			diff_t d = {.additions=vector_new(sizeof(add_t)), .deletions=vector_new(sizeof(del_t))};
+			d.author = session->user_ses->user.index;
+			d.time = (uint64_t)time(NULL);
+
 			vector_pushcpy(&d.deletions, &(del_t){.txt=txt.current, .pos=0});
 
 			add_diff(&txt, &d, "");
@@ -1826,6 +2296,9 @@ void route(session_t* session, request* req) {
         vector_t contribs = {.data = obj.fields[article_contrib_i],
           .size = sizeof(uint64_t),
           .length = data->contributors};
+
+				int is_contrib =
+					session->user_ses->user.exists ? vector_search(&contribs, &session->user_ses->user.index)>0 : 0;
         
         vector_t contribs_arg = vector_new(sizeof(template_args));
         vector_t contribs_strs = vector_new(sizeof(char*));
@@ -1846,16 +2319,18 @@ void route(session_t* session, request* req) {
 
 				if (data->ty == article_img) {
 					respond_template(session, 200, "article", title, 1, 1,
-							perms & perms_edit_article, perms & perms_delete_article,
+							is_contrib && (perms & perms_edit_article),
+							is_contrib && (perms & perms_delete_article),
 							&path_arg, &contribs_arg, title, NULL, url.data);
-					vector_free(&url);
 
 				} else {
 					respond_template(session, 200, "article", title, 1, 0,
-							perms & perms_edit_article, perms & perms_delete_article,
+							is_contrib && (perms & perms_edit_article),
+							is_contrib && (perms & perms_delete_article),
 							&path_arg, &contribs_arg, title, obj.fields[article_html_i], url.data);
 				}
 
+				vector_free(&url);
         vector_free_strings(&contribs_strs);
 
         break;

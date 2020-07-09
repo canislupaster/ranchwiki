@@ -749,7 +749,7 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
 			char* content = session->parser.req.content;
 
 			while (!skip_word(&content, session->parser.multipart_boundary) && *content) content++;
-			skip_newline(&content); //skip newline
+			skip_newline(&content);
 			
 			while (*content) {
 				//parse preamble
