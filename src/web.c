@@ -1006,10 +1006,10 @@ void start_listen(ctx_t* ctx, const char *port) {
 
   memset(&hints, 0, sizeof(hints));
 
-  hints.ai_family = AF_UNSPEC;
+  hints.ai_family = AF_INET;
+	hints.ai_protocol = IPPROTO_TCP;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE;
-  hints.ai_flags |= AI_ADDRCONFIG;
+  hints.ai_flags = AI_PASSIVE || AI_NUMERICSERV || AI_ADDRCONFIG;
 
   struct addrinfo *res;
   int rv = getaddrinfo(NULL, port, &hints, &res);
@@ -1034,5 +1034,5 @@ void start_listen(ctx_t* ctx, const char *port) {
     }
   }
 
-  errx(1, "could not start listener");
+  errx(1, "could not start listener %i", errno);
 }
