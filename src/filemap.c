@@ -882,7 +882,7 @@ vector_t filemap_page_read(filemap_ordered_list_t* list, uint64_t length) {
 
 	for (uint64_t i = 0; i < length; i++) {
 		// skip sentinels
-		while (data[i * 2 + 1] == 0) fread(&data[i * 2], 8 * 2, 1, list->file);
+		do fread(&data[i * 2], 8 * 2, 1, list->file); while (data[i * 2 + 1] == 0);
 	}
 
 	return vec;
@@ -1055,11 +1055,12 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 
 	uint64_t length = iter.length;
 	uint64_t page = iter.page;
+	uint64_t min = iter.min;
 
 	while (cont) {
 		cont = filemap_page_next(&iter);
 
-		if (item_order <= iter.min || !cont) {
+		if (item_order > min && (item_order <= iter.min || !cont)) {
 			fseek(list->file, page + 8*3, SEEK_SET);
 			vector_t data = filemap_page_read(list, length);
 
@@ -1082,6 +1083,7 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 
 		length = iter.length;
 		page = iter.page;
+		min = iter.min;
 	}
 
 	mtx_unlock(&list->lock);
