@@ -70,11 +70,12 @@ vector_t article_group_list(ctx_t* ctx, filemap_object* article, articledata_t* 
     vector_t item_pathdata = filemap_cpyfield(&ctx->article_fmap, &list_item, article_path_i).val;
 
     vector_t item_path = vector_from_strings(item_pathdata.data, item_data->path_length);
-		char* item_end = heapcpystr(vector_getstr(&item_path, item_path.length-1));
+    char* item_end = heapcpystr(vector_getstr(&item_path, item_path.length-1));
 
-		vector_t url = vector_new(1);
-		vector_stockstr(&url, "/wiki/");
-		vector_flatten_strings(&item_path, &url, "/", 1);
+    vector_t url = vector_new(1);
+    vector_stockstr(&url, "/wiki/");
+    vector_flatten_strings(&item_path, &url, "/", 1);
+    vector_pushcpy(&url, "\0");
 
     vector_pushcpy(&items_arg, &(template_args){.cond_args=heapcpy(sizeof(int), &is_group),
       .sub_args=heapcpy(sizeof(char*[2]), (char*[2]){url.data, item_end})});
