@@ -133,7 +133,6 @@ filemap_t filemap_new(char* data, unsigned fields, int overwrite) {
 		// initialize freelist
 		fwrite(&filemap.free, 8, 1, filemap.data);
 
-		fclose(filemap.data);
 		filemap.data = freopen(data, "rb+", filemap.data);
 	} else {
 		fseek(filemap.data, 0, SEEK_SET);
@@ -183,7 +182,6 @@ filemap_index_t filemap_index_new(filemap_t* fmap, char* index, unsigned field, 
 
 		write_slots(&new_index, 2);	 // write slots afterwards
 
-		fclose(new_index.file);
 		freopen(index, "rb+", new_index.file);
 	} else {
 		// read the seed (4 bytes x 4)
@@ -213,7 +211,6 @@ filemap_list_t filemap_list_new(char* list, int overwrite) {
 
 		fwrite(&new_list.length, 8, 1, new_list.file);
 
-		fclose(new_list.file);
 		freopen(list, "rb+", new_list.file);
 	} else {
 		fread(&new_list.length, 8, 1, new_list.file);
@@ -303,7 +300,6 @@ filemap_ordered_list_t filemap_ordered_list_new(char* order_list, int page_size,
 
 		write_pages(&new_list, 0, UINT64_MAX, 0);
 
-		fclose(new_list.file);
 		freopen(order_list, "rb+", new_list.file);
 	} else {
 		fread(&new_list.pages, 8, 1, new_list.file);
