@@ -123,6 +123,7 @@ diff_t find_changes(char* from, char* to) {
 
   if (!from) {
     vector_pushcpy(&d.additions, &(add_t){.pos=0, .txt=to});
+		return d;
   }
 
   char* from_start = from;

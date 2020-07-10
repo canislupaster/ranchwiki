@@ -15,6 +15,7 @@
 #include "util.h"
 #include "vector.h"
 #include "hashtable.h"
+#include "threads.h"
 #include "reasonphrases.h"
 #include "context.h"
 void respond(session_t* session, int stat, char* content, unsigned long len, header* headers, int headers_len);

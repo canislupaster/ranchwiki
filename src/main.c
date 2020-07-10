@@ -81,6 +81,7 @@ int util_main(void* udata) {
     vector_t arg = vector_split_str(in, " \n");
 		if (arg.length == 0) {
 			drop(in);
+			vector_free(&arg);
 			continue;
 		}
 		
@@ -92,7 +93,9 @@ int util_main(void* udata) {
       filemap_partial_object name_user_ref = filemap_find(&ctx->user_by_name, name, strlen(name)+1);
 			if (!name_user_ref.exists) {
 				perror("User not found");
-				drop(in); continue;
+				drop(in);
+				vector_free(&arg);
+				continue;
 			}
 
       filemap_partial_object list_user = filemap_deref(&ctx->user_id, &name_user_ref);
@@ -127,6 +130,7 @@ int util_main(void* udata) {
 				fprintf(stderr, "couldnt parse wiki path / max diffs is zero");
 				
 				vector_free_strings(&path);
+				vector_free(&arg);
 				drop(in);
 				continue;
 			}
@@ -141,6 +145,7 @@ int util_main(void* udata) {
 				fprintf(stderr, "text does not exist");
 				
 				vector_free(&wpath);
+				vector_free(&arg);
 				drop(in);
 				continue;
 			}
@@ -187,6 +192,7 @@ int util_main(void* udata) {
       fprintf(stderr, "Action %s not found\n", vector_getstr(&arg, 0));
     }
 
+		vector_free(&arg);
     drop(in);
   }
 

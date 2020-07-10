@@ -386,7 +386,7 @@ void update_article_keywords(ctx_t* ctx, vector_t* add_keywords, vector_t* remov
 
 		//wildcard match all words if article matches
 		if (!adding) {
-			stok->score = 0;
+			if (stok) stok->score = 0;
 		} else {
 			//either revise current score/pos or add new
 			if (stok && stok->score < tok->score) *stok = atok;
@@ -1172,9 +1172,6 @@ void route(session_t* session, request* req) {
       vector_free(&params);
       return;
     }
-
-    //lock when accessing both maps, so they stay in concord
-    mtx_lock(&session->user_ses->lock);
 		
     user_session** old_ses =
         map_find(&session->ctx->user_sessions_by_idx, &user_ref.index);
@@ -1184,7 +1181,6 @@ void route(session_t* session, request* req) {
 
     map_insertcpy(&session->ctx->user_sessions_by_idx, &user_ref.index, &session->user_ses);
 		
-    mtx_unlock(&session->user_ses->lock);
 
     respond_redirect(session, "/account");
     filemap_object_free(&session->ctx->user_fmap, &user);
@@ -1253,7 +1249,6 @@ void route(session_t* session, request* req) {
 
       user_session** user_ses_ref = map_find(&session->ctx->user_sessions_by_idx, &list_user.index);
 			user_session* user_ses = user_ses_ref ? *user_ses_ref : NULL;
-      if (user_ses) mtx_lock(&user_ses->lock);
 
       filemap_object usee = filemap_cpy(&session->ctx->user_fmap, &list_user);
 
@@ -1269,7 +1264,6 @@ void route(session_t* session, request* req) {
 
       if (user_ses) {
         user_ses->user = filemap_partialize(&list_user, &new_u);
-        mtx_unlock(&user_ses->lock);
       }
 
       respond_template(session, 200, "profile", usee.fields[user_name_i], 1,
@@ -1281,7 +1275,6 @@ void route(session_t* session, request* req) {
       return;
     }
 
-    mtx_lock(&session->user_ses->lock);
 
     filemap_object user =
         filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
@@ -1290,7 +1283,6 @@ void route(session_t* session, request* req) {
       respond_template(session, 200, "login", "Login", 1,
                        "You aren't logged in");
       
-      mtx_unlock(&session->user_ses->lock);
       return;
     }
 
@@ -1299,7 +1291,6 @@ void route(session_t* session, request* req) {
 
     if (params.length != 3) {
       respond_error(session, 400, "Username email and biography not provided");
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1314,7 +1305,6 @@ void route(session_t* session, request* req) {
                        user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
       
       filemap_object_free(&session->ctx->user_fmap, &user);
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1328,7 +1318,6 @@ void route(session_t* session, request* req) {
                        user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
       
       filemap_object_free(&session->ctx->user_fmap, &user);
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1343,7 +1332,6 @@ void route(session_t* session, request* req) {
                        user.fields[user_bio_i]);
 
       filemap_object_free(&session->ctx->user_fmap, &user);
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1356,7 +1344,6 @@ void route(session_t* session, request* req) {
       respond_template(session, 200, "account", user.fields[user_name_i], 1,
                        "Email is already in use", username, email, bio);
       filemap_object_free(&session->ctx->user_fmap, &user);
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1391,10 +1378,8 @@ void route(session_t* session, request* req) {
     filemap_object_free(&session->ctx->user_fmap, &user);
     vector_free(&params);
 
-    mtx_unlock(&session->user_ses->lock);
 
   } else if (strcmp(base, "password") == 0 && req->method == POST) {
-    mtx_lock(&session->user_ses->lock);
 
     filemap_object user =
         filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
@@ -1411,7 +1396,6 @@ void route(session_t* session, request* req) {
       respond_error(session, 400, "Password not provided");
       filemap_object_free(&session->ctx->user_fmap, &user);
       
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1424,7 +1408,6 @@ void route(session_t* session, request* req) {
                        user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
 
       filemap_object_free(&session->ctx->user_fmap, &user);
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1446,10 +1429,8 @@ void route(session_t* session, request* req) {
                      user.fields[user_email_i], user.fields[user_bio_i]);
     filemap_object_free(&session->ctx->user_fmap, &user);
 
-    mtx_unlock(&session->user_ses->lock);
 
   } else if (strcmp(base, "logout") == 0) {
-    mtx_lock(&session->user_ses->lock);
 
     if (session->user_ses->user.exists) {
       map_remove(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
@@ -1457,7 +1438,6 @@ void route(session_t* session, request* req) {
 
     session->user_ses->user.exists = 0;
 
-    mtx_unlock(&session->user_ses->lock);
     respond_redirect(session, "/");
 
   } else if (strcmp(base, "new") == 0 && req->method == GET) {
@@ -1466,11 +1446,9 @@ void route(session_t* session, request* req) {
 
   } else if (strcmp(base, "new") == 0 && req->method == POST) {
     //lock for consistent contributors
-    mtx_lock(&session->user_ses->lock);
     
     if (!(get_perms(session) & perms_create_article)) {
       respond_template(session, 200, "new", "New article", 0, 0, "", "");
-      mtx_unlock(&session->user_ses->lock);
       return;
     }
 
@@ -1479,7 +1457,6 @@ void route(session_t* session, request* req) {
 
     if (params.length != 2) {
       respond_error(session, 400, "Path and content of article not provided");
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1493,7 +1470,6 @@ void route(session_t* session, request* req) {
       respond_template(session, 200, "new", "New article", 1, 1, "Invalid path",
                        path_str, content);
 
-      mtx_unlock(&session->user_ses->lock);
       vector_free_strings(&path);
       vector_free(&params);
       return;
@@ -1510,7 +1486,6 @@ void route(session_t* session, request* req) {
 			respond_template(session, 200, "new", "New article", 1, 1,
 					err, path_str, content);
 
-			mtx_unlock(&session->user_ses->lock);
 
 			drop(html_cache);
 			refs_free(&refs);
@@ -1534,7 +1509,6 @@ void route(session_t* session, request* req) {
 					"Article with that path already exists",
 					path_str, content);
 
-			mtx_unlock(&session->user_ses->lock);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
 			drop(html_cache);
@@ -1547,7 +1521,6 @@ void route(session_t* session, request* req) {
 			return;
 		}
 
-    mtx_unlock(&session->user_ses->lock);
 
 		update_article_refs(session->ctx, &flattened, &refs, NULL, article.index);
 		refs_free(&refs);
@@ -1598,11 +1571,9 @@ void route(session_t* session, request* req) {
 
 		//very similar to /new but changes for multipart and files
   } else if (strcmp(base, "upload")==0 && req->method==POST) {
-    mtx_lock(&session->user_ses->lock);
     
     if (!(get_perms(session) & perms_create_article)) {
       respond_template(session, 200, "new", "New article", 0, 0, "", "");
-      mtx_unlock(&session->user_ses->lock);
       return;
     }
 
@@ -1611,7 +1582,6 @@ void route(session_t* session, request* req) {
 
     if (params.length != 2) {
       respond_error(session, 400, "Path and file not provided");
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1624,7 +1594,6 @@ void route(session_t* session, request* req) {
 		
 		if (!content->mime) {
 			respond_error(session, 400, "Missing mime for file");
-			mtx_unlock(&session->user_ses->lock);
 			vector_free(&params);
 			return;
 		}
@@ -1634,7 +1603,6 @@ void route(session_t* session, request* req) {
       respond_template(session, 200, "new", "New article", 1, 1, "Invalid path",
                        path_str, "");
 
-      mtx_unlock(&session->user_ses->lock);
 			drop(path_str);
 
       vector_free_strings(&path);
@@ -1654,7 +1622,6 @@ void route(session_t* session, request* req) {
 					"Article with that path already exists",
 					path_str, "");
 
-			mtx_unlock(&session->user_ses->lock);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 			drop(path_str);
 
@@ -1664,7 +1631,6 @@ void route(session_t* session, request* req) {
 			return;
 		}
 
-    mtx_unlock(&session->user_ses->lock);
 		
     vector_t out_path = make_path(&path);
 
@@ -1722,12 +1688,10 @@ void route(session_t* session, request* req) {
 		drop(data);
 
 	} else if (strcmp(base, "edit")==0 && req->method==POST) {
-    mtx_lock(&session->user_ses->lock);
     
 		permissions_t perms = get_perms(session);
     if (!(perms & perms_edit_article)) {
       respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
-      mtx_unlock(&session->user_ses->lock);
       return;
     }
 
@@ -1736,7 +1700,6 @@ void route(session_t* session, request* req) {
 
     if (params.length != 3) {
       respond_error(session, 400, "Paths and content of article not provided");
-      mtx_unlock(&session->user_ses->lock);
       vector_free(&params);
       return;
     }
@@ -1753,7 +1716,6 @@ void route(session_t* session, request* req) {
       respond_template(session, 200, "edit", "Edit article", 1, 1, "Invalid path",
                        path_str, new_path_str, content);
 
-      mtx_unlock(&session->user_ses->lock);
       vector_free_strings(&new_path);
       vector_free_strings(&path);
       vector_free(&params);
@@ -1774,7 +1736,6 @@ void route(session_t* session, request* req) {
       respond_template(session, 200, "edit", "Edit article", 1, 1, "Article does not exist / is not a text",
                        path_str, new_path_str, content);
 
-      mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
@@ -1789,7 +1750,6 @@ void route(session_t* session, request* req) {
 		if (!(perms & perms_admin) && vector_search(&contribs, &session->user_ses->user.index)==0) {
       respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 
-      mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
@@ -1836,7 +1796,6 @@ void route(session_t* session, request* req) {
 				respond_template(session, 200, "edit", "Edit article", 1, 1, "New path is already taken", //TODO: which segment
 						path_str, new_path_str, content);
 
-				mtx_unlock(&session->user_ses->lock);
 
 				filemap_object_free(&session->ctx->article_fmap, &obj);
 
@@ -1862,7 +1821,6 @@ void route(session_t* session, request* req) {
 			respond_template(session, 200, "edit", "Edit article", 1, 1,
 					err, path_str, new_path_str, content);
 
-			mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 
 			unlock_article(session->ctx, flattened.data, flattened.length);
@@ -1981,7 +1939,6 @@ void route(session_t* session, request* req) {
 			url = flatten_url(&path);
 		}
 		
-		mtx_unlock(&session->user_ses->lock);
 
 		ctx_cache_remove(session->ctx, wpath.data);
 
@@ -2018,13 +1975,11 @@ void route(session_t* session, request* req) {
 		
 	//nearly identical
 	} else if (strcmp(base, "setcontrib")==0 && req->method == POST) {
-		mtx_lock(&session->user_ses->lock);
 
 		permissions_t perms = get_perms(session);
 
 		if (!(perms & perms_edit_article)) {
 			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
-			mtx_unlock(&session->user_ses->lock);
 			return;
 		}
 
@@ -2053,7 +2008,6 @@ void route(session_t* session, request* req) {
 			respond_template(session, 200, "edit", "Edit article", 1, 1,
 					"Article does not exist / is not a text", path, path, "");
 
-			mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
@@ -2077,7 +2031,6 @@ void route(session_t* session, request* req) {
 					"User does not exist", path, path, cache->data);
 			ctx_cache_done(session->ctx, cache, wikipath.data);
 
-			mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->user_fmap, &user_obj);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
@@ -2095,7 +2048,6 @@ void route(session_t* session, request* req) {
 			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 			ctx_cache_done(session->ctx, cache, wikipath.data);
 
-			mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
@@ -2114,7 +2066,6 @@ void route(session_t* session, request* req) {
 
 			ctx_cache_done(session->ctx, cache, wikipath.data);
 
-			mtx_unlock(&session->user_ses->lock);
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			filemap_object_free(&session->ctx->user_fmap, &user_obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
@@ -2140,7 +2091,6 @@ void route(session_t* session, request* req) {
 		filemap_list_update(&session->ctx->article_id, &article, &new_obj);
 		filemap_delete_object(&session->ctx->article_fmap, &obj);
 
-		mtx_unlock(&session->user_ses->lock);
 		unlock_article(session->ctx, flattened.data, flattened.length);
 
 		vector_t redir = vector_new(1);

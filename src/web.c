@@ -21,6 +21,7 @@
 #include "util.h"
 #include "vector.h"
 #include "hashtable.h"
+#include "threads.h"
 
 #include "context.h"
 #include "reasonphrases.h"
@@ -51,6 +52,27 @@ session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen
   } else {
     session->client_addr = strdup(host);
   }
+	
+	//initialize user session
+	char* key = strdup(host);
+	map_insert_result session_res = map_insert_locked(&session->ctx->user_sessions, &key);
+
+	if (!session_res.exists) {
+		*(user_session**)session_res.val = heap(sizeof(user_session));
+		session->user_ses = *(user_session**)session_res.val;
+
+		mtx_init(&session->user_ses->lock, mtx_plain);
+
+		atomic_store(&session->user_ses->last_get, 0);
+		atomic_store(&session->user_ses->last_lock, 0);
+		atomic_store(&session->user_ses->last_access, 0);
+
+		session->user_ses->user.exists = 0;
+	} else {
+		session->user_ses = *(user_session**)session_res.val;
+	}
+	
+	rwlock_unwrite(session->ctx->user_sessions.lock);
 
   return session;
 }
@@ -104,6 +126,8 @@ void terminate(session_t *session) {
 
   bufferevent_disable(session->bev, EV_READ);
 
+	mtx_unlock(&session->user_ses->lock);
+	
   drop(session->client_addr);
   session->closed = 1;
 }
@@ -816,6 +840,7 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
 
     return 1;
   } else {
+		mtx_unlock(&session->user_ses->lock);
     return 0; //wait for more to arrive
   }
 }
@@ -827,6 +852,7 @@ void route(session_t* session, request* req);
    checked. */
 void readcb(struct bufferevent *bev, void* ctx) {
   session_t *session = (session_t *)ctx;
+	mtx_lock(&session->user_ses->lock);
 
   struct evbuffer* evbuf = bufferevent_get_input(bev);
   
@@ -889,7 +915,7 @@ void readcb(struct bufferevent *bev, void* ctx) {
 
         session->parser.content_parsing = 1;
         
-        if (!parse_content(session, evbuf)) return;
+				if (!parse_content(session, evbuf)) return;
       }
     
     //parse request
@@ -928,25 +954,6 @@ void readcb(struct bufferevent *bev, void* ctx) {
   //respond to pending requests
   vector_iterator req_iter = vector_iterate(&session->requests);
   while (vector_next(&req_iter)) {
-		//initialize user session
-    char* key = strdup(session->client_addr);
-		map_insert_result session_res = map_insert(&session->ctx->user_sessions, &key);
-
-		if (!session_res.exists) {
-			*(user_session**)session_res.val = heap(sizeof(user_session));
-			session->user_ses = *(user_session**)session_res.val;
-
-      mtx_init(&session->user_ses->lock, mtx_plain);
-
-			atomic_store(&session->user_ses->last_get, 0);
-			atomic_store(&session->user_ses->last_lock, 0);
-			atomic_store(&session->user_ses->last_access, 0);
-
-			session->user_ses->user.exists = 0;
-		} else {
-			session->user_ses = *(user_session**)session_res.val;
-		}
-
     route(session, req_iter.x);
 
 		//store last access for session expiry
@@ -956,6 +963,7 @@ void readcb(struct bufferevent *bev, void* ctx) {
   }
 
   vector_clear(&session->requests);
+	mtx_unlock(&session->user_ses->lock);
 }
 
 void listen_error(struct evconnlistener* listener, void* ctx) {
@@ -971,6 +979,8 @@ void eventcb(struct bufferevent *bev, short events, void* ctx) {
   session_t *session = (session_t *)ctx;
   
   if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT)) {
+		mtx_lock(&session->user_ses->lock);
+		
     bufferevent_free(session->bev);
     if (!session->closed) terminate(session);
     drop(session);
