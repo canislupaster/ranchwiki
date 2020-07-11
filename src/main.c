@@ -103,7 +103,7 @@ int util_main(void* udata) {
       filemap_object user = filemap_cpy(&ctx->user_fmap, &list_user);
 
       userdata_t* data = (userdata_t*)user.fields[user_data_i];
-      data->perms = (char)atoi(vector_getstr(&arg, 2));
+      data->perms = (char)strtol(vector_getstr(&arg, 2), NULL, 0);
 
       user_session** ses_ref = map_find(&ctx->user_sessions_by_idx, &list_user.index);
       user_session* ses = ses_ref ? *ses_ref : NULL;
@@ -123,7 +123,7 @@ int util_main(void* udata) {
 			
 		} else if (strcmp(vector_getstr(&arg, 0), "diff")==0 && arg.length==3) {
 			char* path_str = vector_getstr(&arg, 1);
-			int maxd = atoi(vector_getstr(&arg, 2));
+			int maxd = strtol(vector_getstr(&arg, 2), NULL, 10);
 			
 			vector_t path = vector_new(sizeof(char*));
 			if (!parse_wiki_path(path_str, &path) || maxd==0) {
@@ -257,9 +257,11 @@ int main(int argc, char** argv) {
 
 	global_ctx = &ctx;
 
-  struct sigaction segv;
-  segv.sa_sigaction = &sighandler;
-  sigaction(SIGSEGV, &segv, NULL);
+  struct sigaction sact;
+  sact.sa_sigaction = &sighandler;
+	
+  sigaction(SIGSEGV, &sact, NULL);
+	sigaction(SIGABRT, &sact, NULL);
 
   ctx.digest_ctx = EVP_MD_CTX_create();
 

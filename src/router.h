@@ -12,5 +12,4 @@
 #include "locktable.h"
 #include "util.h"
 #include "vector.h"
-vector_t
-flatten_wikipath(vector_t* path);
+vector_t flatten_wikipath(vector_t* path);

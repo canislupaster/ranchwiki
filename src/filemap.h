@@ -84,6 +84,14 @@ typedef struct {
 
 	char exists;
 } filemap_object;
+typedef struct {
+	FILE* file;
+	mtx_t* lock;
+
+	uint64_t pos;	 // file position
+
+	filemap_partial_object obj;
+} filemap_iterator;
 filemap_t filemap_new(char* data, unsigned fields, int overwrite);
 filemap_index_t filemap_index_new(filemap_t* fmap, char* index, unsigned field, int overwrite);
 filemap_list_t filemap_list_new(char* list, int overwrite);
@@ -114,6 +122,10 @@ filemap_ord_partial_object filemap_ordered_insert(filemap_ordered_list_t* list,
 int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order, filemap_partial_object* obj);
 filemap_partial_object filemap_get_idx(filemap_list_t* list, uint64_t i);
 void filemap_list_update(filemap_list_t* list, filemap_partial_object* partial, filemap_object* obj);
+filemap_iterator filemap_list_iterate(filemap_list_t* list);
+uint64_t filemap_list_pos(uint64_t idx);
+uint64_t filemap_list_idx(uint64_t pos);
+vector_t filemap_readmany(filemap_iterator* iter, int* more, unsigned max);
 filemap_object filemap_push(filemap_t* filemap, char** fields, uint64_t* lengths);
 typedef struct {
 	uint64_t field;

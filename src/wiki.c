@@ -405,47 +405,52 @@ typedef struct {
 	unsigned long diff;
 } dseg;
 
-//return dseg after split
 //origin comes before, new overlaps/is adjacent in order
-unsigned long split_dseg(vector_t* segs, dseg new_seg, unsigned long last_segi, unsigned long start) {
+void split_dseg(vector_t* segs, dseg new_seg, unsigned long last_segi, unsigned long start) {
 	unsigned long slen=0;
 
 	vector_iterator iter = vector_iterate(segs);
 	iter.i = last_segi;
 
-	while (vector_next(&iter) && slen < new_seg.len+start) {
+	while (slen < new_seg.len+start) {
+		vector_next(&iter);
+		
 		dseg* seg = iter.x;
 		slen += seg->len;
 	}
 
-	unsigned long remove_from = last_segi+1;
-
-	if (start==0) {
-		remove_from--;
-	} else {
+	unsigned long remove_from = last_segi;
+	
+	if (start!=0) {
 		dseg* first = vector_get(segs, last_segi);
 		first->len = start;
 		
 		slen -= start;
+		
+		remove_from++;
 	}
 	
-	dseg* last = vector_get(segs, iter.i-2);
+	dseg last = *(dseg*)vector_get(segs, iter.i-1);
 
 	if (slen > new_seg.len) {
-		last->str += last->len - (slen-new_seg.len);
-		last->len = slen-new_seg.len;
-	} else {
-		vector_remove(segs, iter.i-2);
+		last.str += last.len - (slen-new_seg.len);
+		last.len = slen-new_seg.len;
+		
+		vector_insertcpy(segs, iter.i, &last);
 	}
 
 	//remove everything in between and insert new seg at beginning
+		
+	if (iter.i > remove_from)
+		vector_removemany(segs, remove_from, iter.i-remove_from);
 	
-	if (iter.i-2 == last_segi) iter.i++; //last_segi is added "separately" because otherwise slen is zero
-	
-	vector_removemany(segs, remove_from, iter.i-2-remove_from);
 	vector_insertcpy(segs, remove_from, &new_seg);
-	
-	return iter.i-1;
+
+	iter = vector_iterate(segs);
+	while (vector_next(&iter)) {
+		dseg* s = iter.x;
+		if (!s->str) abort();
+	}
 }
 
 vector_t display_diffs(text_t* txt) {
@@ -478,7 +483,6 @@ vector_t display_diffs(text_t* txt) {
 			vector_iterator segiter = vector_iterate(&segs);
 			unsigned long pos=0;
 
-			unsigned long last_segi = 0;
 			dseg* seg;
 
 			while (vector_next(&segiter)) {
@@ -487,15 +491,12 @@ vector_t display_diffs(text_t* txt) {
 
 				pos += seg->len;
 				if (pos > (iteradd ? add->pos : del->pos)) break;
-				
-				last_segi = segiter.i-1;
 			}
 
-			segiter.i =
-				split_dseg(&segs,
-					(dseg){.diff=iter.i-1, .len=strlen(add->txt), .ty=iteradd ? dseg_add : dseg_del,
-							.str=iteradd ? add->txt : del->txt}, last_segi,
-							seg->ty==dseg_add ? 0 : add->pos-(pos-seg->len));
+			split_dseg(&segs,
+				(dseg){.diff=iter.i-1, .len=strlen(add->txt), .ty=iteradd ? dseg_add : dseg_del,
+					.str=iteradd ? add->txt : del->txt}, segiter.i-1,
+					seg->ty==dseg_add ? 0 : add->pos-(pos-seg->len));
 		}
 	}
 

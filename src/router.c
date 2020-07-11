@@ -105,8 +105,7 @@ vector_t flatten_url(vector_t* path) {
   return flattened;
 }
 
-vector_t
-flatten_wikipath(vector_t* path) {
+vector_t flatten_wikipath(vector_t* path) {
   vector_t flattened = vector_new(1);
 	vector_stockstr(&flattened, DATA_PATH);
   vector_flatten_strings(path, &flattened, "/", 1);
@@ -1254,7 +1253,7 @@ void route(session_t* session, request* req) {
       filemap_object usee = filemap_cpy(&session->ctx->user_fmap, &list_user);
 
       char* perms_str = vector_getstr(&params, 0);
-      uint8_t usee_perms = (uint8_t)atoi(perms_str);
+      uint8_t usee_perms = (uint8_t)strtol(perms_str, NULL, 0);
 
       userdata_t* data = (userdata_t*)usee.fields[user_data_i];
       data->perms = usee_perms;
@@ -2270,7 +2269,7 @@ void route(session_t* session, request* req) {
 
 				if (data->ty == article_img) {
 					respond_template(session, 200, "article", title, 1, 1,
-							is_contrib && (perms & perms_edit_article),
+							0, //cannot edit image
 							is_contrib && (perms & perms_delete_article),
 							&path_arg, &contribs_arg, title, NULL, url.data);
 
@@ -2342,6 +2341,44 @@ void route(session_t* session, request* req) {
     filemap_object_free(&session->ctx->article_fmap, &obj);
 		vector_free(&wpath);
     vector_free(&path);
+	
+	} else if (strcmp(base, "users")==0) {
+		
+		filemap_iterator iter = filemap_list_iterate(&session->ctx->user_id);
+		if (req->path.length > 1) {
+			uint64_t idx = (uint64_t)strtoull(vector_getstr(&req->path, 1), NULL, 10);
+			iter.pos = filemap_list_pos(idx);
+		}
+
+		int more;
+		vector_t res = filemap_readmany(&iter, &more, PAGE_SIZE);
+
+		if (res.length==0) {
+			respond_template(session, 200, "users", "Userlist", 0, 0, NULL, "");
+		} else {
+			vector_t user_args = vector_new(sizeof(template_args));
+			vector_t unames = vector_new(sizeof(char*));
+
+			//similar code BUT NOT THE SAME
+			//this one works on partials and users are guaranteed to exist
+			//sorry lmao
+			vector_iterator resiter = vector_iterate(&res);
+			while (vector_next(&resiter)) {
+				filemap_partial_object* list_user = resiter.x;
+
+				filemap_field uname = filemap_cpyfield(&session->ctx->user_fmap, list_user, user_name_i);
+				vector_pushcpy(&user_args, &(template_args){.sub_args=heapcpy(sizeof(char**), &uname.val.data)});
+				vector_pushcpy(&unames, &uname.val.data);
+			}
+
+			char* next = heapstr("%llu", filemap_list_idx(iter.pos));
+
+			respond_template(session, 200, "users", "Userlist", 1, more, &user_args, next);
+
+			drop(next);
+			vector_free(&res);
+			vector_free_strings(&unames);
+		}
 
 	} else {
     resource* res = map_find(&session->ctx->resources,

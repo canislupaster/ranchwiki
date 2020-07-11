@@ -767,7 +767,6 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
     
     //handle supported formats
     if (session->parser.req.ctype == url_formdata) {
-			printf("query: %s\n", session->parser.req.content);
       parse_querystring(session->parser.req.content, &session->parser.req.query);
     } else if (session->parser.req.ctype == multipart_formdata) {
 			char* content = session->parser.req.content;
@@ -1009,7 +1008,7 @@ void start_listen(ctx_t* ctx, const char *port) {
   hints.ai_family = AF_INET;
 	hints.ai_protocol = IPPROTO_TCP;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE || AI_NUMERICSERV || AI_ADDRCONFIG;
+  hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG;
 
   struct addrinfo *res;
   int rv = getaddrinfo(NULL, port, &hints, &res);

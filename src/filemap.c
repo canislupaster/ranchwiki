@@ -797,8 +797,7 @@ int filemap_remove(filemap_index_t* index, char* key, uint64_t key_size) {
 	return 1;
 }
 
-filemap_iterator filemap_index_iterate(filemap_t* filemap,
-																			 filemap_index_t* index) {
+filemap_iterator filemap_index_iterate(filemap_index_t* index) {
 	filemap_iterator iter = {
 			.pos = INDEX_PREAMBLE, .file = index->file, .lock = &index->lock};
 	return iter;
@@ -810,25 +809,26 @@ filemap_partial_object filemap_add(filemap_list_t* list, filemap_object* obj) {
 
 	mtx_lock(&list->lock);
 
-	if (list->length > 0) {
-		fseek(list->file, -8, SEEK_END);
-
-		uint64_t pos = 0;
-		// go backwards through zero entries until preamble
-		while (1) {
-			fread(&pos, 8, 1, list->file);
-
-			if (pos != 0) break;
-			else if (pos == 16) {
-				fseek(list->file, -8, SEEK_CUR);
-				break;
-			} else {
-				fseek(list->file, -16, SEEK_CUR);
-			}
-		}
-	} else {
+	//uncomment (and add a flag to the list struct?) when slots should be reused from the end
+//	if (list->length > 0) {
+//		fseek(list->file, -8, SEEK_END);
+//
+//		uint64_t pos = 0;
+//		// go backwards through zero entries until preamble
+//		while (1) {
+//			fread(&pos, 8, 1, list->file);
+//
+//			if (pos != 0) break;
+//			else if (pos == 16) {
+//				fseek(list->file, -8, SEEK_CUR);
+//				break;
+//			} else {
+//				fseek(list->file, -16, SEEK_CUR);
+//			}
+//		}
+//	} else {
 		fseek(list->file, 0, SEEK_END);
-	}
+//	}
 
 	res.index = ftell(list->file);
 
@@ -1236,31 +1236,67 @@ void filemap_list_remove_ref(filemap_t* filemap, filemap_list_t* list, filemap_p
 	filemap_list_remove(filemap, list, &temp);
 }
 
-filemap_iterator filemap_list_iterate(filemap_t* filemap,
-																			filemap_list_t* list) {
+filemap_iterator filemap_list_iterate(filemap_list_t* list) {
 	filemap_iterator iter = {.pos = 8, .file = list->file, .lock = &list->lock};
 	return iter;
 }
 
-int filemap_next(filemap_iterator* iter) {
-	fseek(iter->file, iter->pos, SEEK_SET);
+//sorry for using idx interchangeably for file and actual indices
+uint64_t filemap_list_pos(uint64_t idx) {
+	return idx*8 + 8;
+}
 
-	if (feof(iter->file)) {
-		return 0;
-	}
+uint64_t filemap_list_idx(uint64_t pos) {
+	return pos/8 - 1;
+}
 
+int filemap_read_unlocked(filemap_iterator* iter) {
 	do {
 		iter->obj.index = ftell(iter->file);
-		fread(&iter->obj.data_pos, 8, 1, iter->file);
+		if (fread(&iter->obj.data_pos, 8, 1, iter->file)<1) return 0;
 
 	} while ((!iter->obj.data_pos || iter->obj.data_pos == SENTINEL) && !feof(iter->file));
 
-	if (feof(iter->file)) {
-		return 0;
-	} else {
+	return 1;
+}
+
+int filemap_next(filemap_iterator* iter) {
+	mtx_lock(iter->lock);
+	
+	fseek(iter->file, iter->pos, SEEK_SET);
+	iter->pos += 8;
+
+	int ret = filemap_read_unlocked(iter);
+
+	mtx_unlock(iter->lock);
+
+	if (ret) {
 		iter->obj.exists = 1;
 		return 1;
+	} else {
+		return 0;
 	}
+}
+
+vector_t filemap_readmany(filemap_iterator* iter, int* more, unsigned max) {
+	vector_t res = vector_new(sizeof(filemap_partial_object));
+
+	mtx_lock(iter->lock);
+	fseek(iter->file, iter->pos, SEEK_SET);
+
+	while (res.length<max) {
+		*more = filemap_read_unlocked(iter);
+		if (!*more) break;
+
+		iter->obj.exists = 1;
+		vector_pushcpy(&res, &iter->obj);
+	}
+	
+	iter->pos = ftell(iter->file);
+
+	mtx_unlock(iter->lock);
+
+	return res;
 }
 
 filemap_object filemap_push(filemap_t* filemap, char** fields, uint64_t* lengths) {
