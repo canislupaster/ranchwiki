@@ -486,16 +486,17 @@ vector_t display_diffs(text_t* txt) {
 			dseg* seg;
 
 			while (vector_next(&segiter)) {
+				if (pos > (iteradd ? add->pos : del->pos)) break;
+
 				seg = segiter.x;
 				if (seg->ty == dseg_add) continue;
 
 				pos += seg->len;
-				if (pos > (iteradd ? add->pos : del->pos)) break;
 			}
 
 			split_dseg(&segs,
 				(dseg){.diff=iter.i-1, .len=strlen(add->txt), .ty=iteradd ? dseg_add : dseg_del,
-					.str=iteradd ? add->txt : del->txt}, segiter.i-1,
+					.str=iteradd ? add->txt : del->txt}, segiter.i-2,
 					seg->ty==dseg_add ? 0 : add->pos-(pos-seg->len));
 		}
 	}
