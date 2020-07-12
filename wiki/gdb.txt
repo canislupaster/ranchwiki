@@ -1,0 +1,5 @@
+`/home/thomas/ranchwiki/build/ranch' has changed; re-reading symbols.
+Starting program: /home/thomas/ranchwiki/build/ranch ../templates 80
+[New LWP 4587]
+[LWP 4586 exited]
+[Inferior 1 (process 4586) exited normally]
