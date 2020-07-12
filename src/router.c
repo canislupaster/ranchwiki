@@ -20,16 +20,14 @@
 //:)
 
 permissions_t get_perms(session_t* session) {
+	if (!session->user_ses) return perms_none;
+
   filemap_field udata =
       filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_data_i);
 
-  if (!udata.exists) {
-    return perms_none;
-  } else {
-    permissions_t perms = ((userdata_t*)udata.val.data)->perms;
-    vector_free(&udata.val);
-    return perms;
-  }
+	permissions_t perms = ((userdata_t*)udata.val.data)->perms;
+	vector_free(&udata.val);
+	return perms;
 }
 
 cached* article_current(ctx_t* ctx, vector_t* filepath) {
@@ -837,6 +835,7 @@ void article_group_remove(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 	vector_iterator iter = vector_iterate(groups);
 
 	unsigned long key_len = flattened->length;
+	int remove=1;
 
 	while (vector_next(&iter)) {
 		unsigned long segment_len = strlen(vector_getstr(path, path->length-iter.i));
@@ -844,7 +843,7 @@ void article_group_remove(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 
 		filemap_partial_object* group = iter.x;
 
-		if (group->exists) {
+		if (group->exists && remove) {
 			filemap_object obj =
 					filemap_cpy(&ctx->article_fmap, group);
 
@@ -871,13 +870,19 @@ void article_group_remove(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 				filemap_delete_object(&ctx->article_fmap, &obj);
 			} else {
 				filemap_object_free(&ctx->article_fmap, &obj);
-				return; //no child; chain broken
+				remove=0;
 			}
 
 			filemap_object_free(&ctx->article_fmap, &obj);
+			
+			//dont destroy upper group, other children
+			if (items.length>0) {
+				remove=0;
+			}
+			
 			item = group;
-		} else {
-			return; //no parent; chain broken
+		} else if (remove) {
+			remove=0; //no parent; chain broken
 		}
 
 		unlock_article(ctx, flattened->data, key_len);
@@ -946,7 +951,7 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 	uint64_t creation_time = (uint64_t)time(NULL);
 
 	articledata_t data = {
-			.path_length = path->length, .ty = ty,
+		.path_length = (uint32_t)path->length, .ty = ty,
 			.referenced_by = referenced_by.length,
 			.contributors=1, .edit_time=creation_time};
 
@@ -983,7 +988,10 @@ void req_wiki_path(request* req) {
 	vector_iterator iter = vector_iterate(&req->path);
 	while (vector_next(&iter)) {
 		//not very sanitary... TODO: dont implicit free
-		*(char**)iter.x = percent_decode(*(char**)iter.x);
+		char* new = percent_decode(*(char**)iter.x, NULL);
+		
+		drop(*(char**)iter.x);
+		*(char**)iter.x = new;
 	}
 }
 
@@ -1027,6 +1035,34 @@ int route_article(session_t* session, request* req, filemap_object* obj) {
 	return 1;
 }
 
+void session_auth(session_t* session, filemap_partial_object idx) {
+	if (session->user_ses) {
+		char* old_key = map_remove_locked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
+		//otherwise has been removed during session (ex. during /login)
+		if (old_key) {
+			map_remove(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=old_key});
+			rwlock_unwrite(session->ctx->user_sessions_by_idx.lock);
+
+			uses_free(session->user_ses); //so dont need free
+		} else {
+			rwlock_unwrite(session->ctx->user_sessions_by_idx.lock);
+		}
+	}
+
+	char* new_key = heap(AUTH_KEYSZ);
+	RAND_bytes((unsigned char*)new_key, AUTH_KEYSZ);
+
+	session->user_ses = heap(sizeof(user_session));
+	mtx_init(&session->user_ses->lock, mtx_plain);
+	atomic_store(&session->user_ses->last_access, 0);	
+	session->user_ses->user = idx;
+
+	map_insertcpy(&session->ctx->user_sessions,
+								&(map_sized_t){.size=AUTH_KEYSZ, .bin=heapcpy(128, new_key)}, &session->user_ses);
+	map_insertcpy(&session->ctx->user_sessions_by_idx, &idx.index, new_key);
+	session->auth_tok = new_key;
+}
+
 void route(session_t* session, request* req) {
   if (req->path.length == 0) {
     filemap_object top = filemap_findcpy(&session->ctx->article_by_name, "", 0);
@@ -1041,7 +1077,7 @@ void route(session_t* session, request* req) {
       items_arg = vector_new(sizeof(template_args));
     }
 
-		if (session->user_ses->user.exists) {
+		if (session->user_ses) {
 			filemap_field uname = filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_name_i);
 			respond_template(session, 200, "home", "ranch", 1, get_perms(session) & perms_create_article, &items_arg, uname.val.data);
 
@@ -1124,10 +1160,10 @@ void route(session_t* session, request* req) {
     filemap_insert(&session->ctx->user_by_name, &user_ref);
     filemap_insert(&session->ctx->user_by_name, &user_ref);
 
-    session->user_ses->user = idx;
-    map_insertcpy(&session->ctx->user_sessions_by_idx, &idx.index, &session->user_ses);
+		session_auth(session, idx);
 
     respond_redirect(session, "/account");
+		vector_free(&params);
 
   } else if (strcmp(base, "login") == 0 && req->method == POST) {
     vector_t params =
@@ -1173,15 +1209,23 @@ void route(session_t* session, request* req) {
       return;
     }
 		
-    user_session** old_ses =
-        map_find(&session->ctx->user_sessions_by_idx, &user_ref.index);
-    if (old_ses) (*old_ses)->user.exists = 0;
-		
-    session->user_ses->user = user_ref;
+		user_session* uses = NULL;
 
-    map_insertcpy(&session->ctx->user_sessions_by_idx, &user_ref.index, &session->user_ses);
-		
+		char* old_ses_key = map_remove_locked(&session->ctx->user_sessions_by_idx, &user_ref.index);
 
+    if (old_ses_key) {
+			uses = map_removeptr(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=old_ses_key});
+		}
+
+		rwlock_unwrite(session->ctx->user_sessions_by_idx.lock);
+
+		if (uses) {
+			mtx_lock(&uses->lock);
+			uses_free(uses);
+		}
+		
+		session_auth(session, user_ref);
+		
     respond_redirect(session, "/account");
     filemap_object_free(&session->ctx->user_fmap, &user);
     vector_free(&params);
@@ -1193,12 +1237,13 @@ void route(session_t* session, request* req) {
 
     filemap_object user;
     if (!arg) {
-      user = filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
-      if (!user.exists) {
+      if (!session->user_ses) {
         respond_template(session, 200, "login", "Login", 1,
                          "You aren't logged in");
         return;
       }
+			
+			user = filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
 
       respond_template(session, 200, "account", user.fields[user_name_i], 0, "",
                        user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
@@ -1247,8 +1292,7 @@ void route(session_t* session, request* req) {
 
       filemap_partial_object list_user = filemap_deref(&session->ctx->user_id, &name_user);
 
-      user_session** user_ses_ref = map_find(&session->ctx->user_sessions_by_idx, &list_user.index);
-			user_session* user_ses = user_ses_ref ? *user_ses_ref : NULL;
+			user_session* ses = uses_from_idx(session->ctx, list_user.index);
 
       filemap_object usee = filemap_cpy(&session->ctx->user_fmap, &list_user);
 
@@ -1260,11 +1304,12 @@ void route(session_t* session, request* req) {
 
       filemap_object new_u = filemap_push(&session->ctx->user_fmap, usee.fields, usee.lengths);
       filemap_list_update(&session->ctx->user_id, &list_user, &new_u);
-      filemap_delete_object(&session->ctx->user_fmap, &usee);
 
-      if (user_ses) {
-        user_ses->user = filemap_partialize(&list_user, &new_u);
+      if (ses) {
+        ses->user = filemap_partialize(&list_user, &new_u);
       }
+			
+      filemap_delete_object(&session->ctx->user_fmap, &usee);
 
       respond_template(session, 200, "profile", usee.fields[user_name_i], 1,
                        usee.fields[user_name_i], usee.fields[user_bio_i]);
@@ -1432,11 +1477,19 @@ void route(session_t* session, request* req) {
 
   } else if (strcmp(base, "logout") == 0) {
 
-    if (session->user_ses->user.exists) {
-      map_remove(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
-    }
+    if (session->user_ses) {
+      char* key = map_remove_locked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
+			
+			if (key)
+				map_remove(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=key});
 
-    session->user_ses->user.exists = 0;
+			rwlock_unwrite(session->ctx->user_sessions_by_idx.lock);
+			
+			if (key) {
+				uses_free(session->user_ses);
+				session->user_ses = NULL;
+			}
+    }
 
     respond_redirect(session, "/");
 
@@ -1532,27 +1585,18 @@ void route(session_t* session, request* req) {
     vector_t out_path = make_path(&path);
 
 		//add diff
-		diff_t d;
 
 		text_t txt = txt_new(out_path.data);
 		read_txt(&txt, 0, 0);
-		if (txt.current) {
-			d = find_changes(txt.current, content);
-		} else {
-			d = (diff_t){.additions = vector_new(sizeof(add_t)),
-				.deletions = vector_new(sizeof(del_t))};
-
-			vector_pushcpy(&d.additions, &(add_t){.pos = 0, .txt = content});
-		}
-
+		
+		diff_t d = find_changes(txt.current, content);
 		d.author = session->user_ses->user.index;
 		d.time = (uint64_t)time(NULL);
 
 		add_diff(&txt, &d, content);
+		diff_free(&d);
+		
 		txt_free(&txt);
-
-		vector_free(&d.additions);
-		vector_free(&d.deletions);
 		
 		vector_t url = flatten_url(&path);
     vector_insertstr(&url, 0, "wiki/");
@@ -1764,6 +1808,7 @@ void route(session_t* session, request* req) {
 		filemap_partial_object new_article;
 
 		vector_t new_referenced_by = vector_new(sizeof(uint64_t));
+		vector_stockcpy(&new_referenced_by, data->referenced_by, obj.fields[article_items_i]);
 		vector_t new_groups;
 
 		if (path_change) {
@@ -1789,7 +1834,7 @@ void route(session_t* session, request* req) {
 				filemap_object_free(&session->ctx->article_fmap, &new_article_obj);
 
 				if (new_data.ty == article_dead)
-					vector_stockcpy(&new_referenced_by, data->referenced_by, new_article_obj.fields[article_items_i]);
+					vector_stockcpy(&new_referenced_by, new_data.referenced_by, new_article_obj.fields[article_items_i]);
 			}
 
 			if ((new_article.exists && new_data.ty!=article_dead) || !group_res) {
@@ -1890,10 +1935,14 @@ void route(session_t* session, request* req) {
 			filemap_ordered_remove_id(&session->ctx->articles_newest, data->edit_time, &article);
 
 			data->edit_time = (uint64_t)time(NULL);
+			data->referenced_by = new_referenced_by.length;
+			data->path_length = new_path.length;
 
 			new_obj = filemap_push_updated(&session->ctx->article_fmap, &obj,
 				(update_t[]){{.field=article_path_i, .new=flattened_path->data, .len=flattened_path->length},
-					{.field=article_html_i, .new=html_cache, .len=strlen(html_cache)+1}}, 2);
+					{.field=article_html_i, .new=html_cache, .len=strlen(html_cache)+1},
+					{.field=article_items_i, .new=new_referenced_by.data, .len=new_referenced_by.length*8},
+					{.field=article_data_i, .new=(char*)data, .len=sizeof(articledata_t)}}, 2);
 
 			if (path_change) {
 				new_article = filemap_add(&session->ctx->article_id, &new_obj);
@@ -1963,6 +2012,8 @@ void route(session_t* session, request* req) {
 		
     vector_free_strings(&path);
 		vector_free_strings(&new_path);
+		
+		vector_free(&new_referenced_by);
 
     vector_free(&flattened);
 		vector_free(&wpath);
@@ -2167,6 +2218,7 @@ void route(session_t* session, request* req) {
 		rerender_articles(session->ctx, &referenced_by, NULL, NULL);
 		
 		vector_t groups = vector_new(sizeof(filemap_partial_object));
+		article_lock_groups(session->ctx, &req->path, &flattened, &groups);
 		article_group_remove(session->ctx, &groups, &req->path, &flattened, &article);
 		vector_free(&groups);
 
@@ -2248,7 +2300,7 @@ void route(session_t* session, request* req) {
           .length = data->contributors};
 
 				int is_contrib =
-					session->user_ses->user.exists ? vector_search(&contribs, &session->user_ses->user.index)>0 : 0;
+					session->user_ses ? vector_search(&contribs, &session->user_ses->user.index)>0 : 0;
         
         vector_t contribs_arg = vector_new(sizeof(template_args));
         vector_t contribs_strs = vector_new(sizeof(char*));
@@ -2319,8 +2371,7 @@ void route(session_t* session, request* req) {
 			case article_img: {
 				cached* cache = ctx_fopen(session->ctx, wpath.data);
 
-				respond(session, 200, cache->data, cache->len, (header[]){
-					{"Content-Type", obj.fields[article_html_i]}}, 1);
+				respond(session, 200, cache->data, cache->len, &(char*[2]){"Content-Type", obj.fields[article_html_i]}, 1);
 
 				ctx_cache_done(session->ctx, cache, wpath.data);
 
@@ -2328,7 +2379,7 @@ void route(session_t* session, request* req) {
 			}
       case article_text: {
 				cached* current = article_current(session->ctx, &wpath);
-				respond(session, 200, current->data, current->len, (header[]){{"Content-Type", "text/plain"}}, 1);
+				respond(session, 200, current->data, current->len, &(char*[2]){"Content-Type", "text/plain"}, 1);
 				ctx_cache_done(session->ctx, current, wpath.data);
 				break;
       }
@@ -2390,6 +2441,6 @@ void route(session_t* session, request* req) {
     }
 
     respond(session, 200, res->content, res->len,
-            (header[1]){{"Content-Type", res->mime}}, 1);
+            &(char*[2]){"Content-Type", res->mime}, 1);
   }
 }

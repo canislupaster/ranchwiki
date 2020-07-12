@@ -17,8 +17,10 @@
 #include "hashtable.h"
 #include "threads.h"
 #include "reasonphrases.h"
+int skip_newline(char** cur);
+char* percent_decode(char* data, unsigned long* sz);
 #include "context.h"
-void respond(session_t* session, int stat, char* content, unsigned long len, header* headers, int headers_len);
+void respond(session_t* session, int stat, char* content, unsigned long len, char* (*headers)[2], int headers_len);
 void respond_redirect(session_t* session, char* url);
 void escape_html(char** str);
 typedef struct {
@@ -37,8 +39,6 @@ typedef struct {
 template_t template_new(char* data);
 void respond_template(session_t* session, int stat, char* template_name, char* title, ...);
 void respond_error(session_t* session, int stat, char* err);
-int skip_newline(char** cur);
-char* percent_decode(char* data);
 vector_t query_find(vector_t *vec, char **params, int num_params, int strict);
 vector_t multipart_find(vector_t *vec, char **params, int num_params, int strict);
 void start_listen(ctx_t* ctx, const char *port);

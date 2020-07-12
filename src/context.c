@@ -20,6 +20,7 @@ const char* GLOBAL_TEMPLATE = "global"; //name of global template
 #define WCACHE_INTERVAL 5*60
 #define CACHE_EXPIRY 3600 //seconds after which to expire cache's weighting 
 #define CACHE_MIN 100 //accesses per hour to qualify in cache
+#define AUTH_KEYSZ 128
 
 #define PAGE_SIZE 12
 
@@ -32,9 +33,6 @@ const char* GLOBAL_TEMPLATE = "global"; //name of global template
 typedef enum {GET, POST} method_t;
 
 typedef enum {url_formdata, multipart_formdata} content_type;
-
-typedef char* query[2];
-typedef char* header[2];
 
 typedef struct {
 	char* name;
@@ -49,6 +47,7 @@ typedef struct {
 
   vector_t path; //vector of char* segments
   vector_t query; //vector of char* [2], if content type is url formdata
+	vector_t cookies; //parsed cookie header
 	vector_t files; //vector of multipart_file, if content type is multipart formdata
 
   map_t headers; //char* -> char*
@@ -67,12 +66,7 @@ typedef struct {
 typedef struct {
 	filemap_partial_object user;
   mtx_t lock; //transaction lock
-
-	//atomic variants of macos time_t and clock_t
-	atomic_long last_access;
-
-	atomic_ulong last_get;
-	atomic_ulong last_lock;
+	atomic_ulong last_access;
 } user_session;
 
 typedef enum {
@@ -160,9 +154,9 @@ typedef struct {
 typedef struct {
   ctx_t *ctx;
   struct bufferevent *bev; //buffered socket
-  char *client_addr;
 
 	user_session* user_ses;
+	char* auth_tok; //set by router for update
   
   struct {
     char done; //uninitialized req
@@ -180,20 +174,36 @@ typedef struct {
   int closed;
 } session_t;
 
+void uses_free(user_session* uses) {
+	mtx_destroy(&uses->lock);
+	drop(uses);
+}
+
+user_session* uses_from_idx(ctx_t* ctx, uint64_t idx) {
+	char* ses_key = map_find(&ctx->user_sessions_by_idx, &idx);
+	user_session* ses=NULL;
+	
+	if (ses_key) {
+		ses = *(user_session**)map_find(&ctx->user_sessions, &(map_sized_t){.bin=ses_key, .size=AUTH_KEYSZ});
+	}
+	
+	return ses;
+}
+
 void cleanup_sessions(ctx_t* ctx) {
 	time_t t = time(NULL);
 
 	map_iterator iter = map_iterate(&ctx->user_sessions);
 	while (map_next(&iter)) {
 		user_session* user_ses = iter.x;
-		time_t last_access = atomic_load(&user_ses->last_access);
+		time_t last_access = (time_t)atomic_load(&user_ses->last_access);
 		
 		if (difftime(last_access, t) > SESSION_TIMEOUT) {
-      mtx_lock(&user_ses->lock);
-      mtx_destroy(&user_ses->lock);
-
+			mtx_lock(&user_ses->lock);
+			uses_free(user_ses);
+			map_remove(&ctx->user_sessions_by_idx, &user_ses->user.index);
       map_next_delete(&iter);
-     }
+		}
 	}
 }
 

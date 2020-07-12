@@ -122,7 +122,7 @@ diff_t find_changes(char* from, char* to) {
   d.deletions = vector_new(sizeof(del_t));
 
   if (!from) {
-    vector_pushcpy(&d.additions, &(add_t){.pos=0, .txt=to});
+    vector_pushcpy(&d.additions, &(add_t){.pos=0, .txt=heapcpystr(to)});
 		return d;
   }
 
@@ -524,6 +524,8 @@ void txt_free(text_t* txt) {
   while (vector_next(&diff_iter)) {
     diff_free(diff_iter.x);
 	}
+	
+	vector_free(&txt->diffs);
 
 	drop(txt->current);
   fclose(txt->file);

@@ -1048,7 +1048,6 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 	filemap_page_iterator iter = filemap_page_iterate(list);
 	
 	int cont = 1;
-	uint64_t item[2] = {item_order, obj->data_pos};
 
 	mtx_lock(&list->lock);
 	filemap_page_next(&iter);
@@ -1060,25 +1059,28 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 	while (cont) {
 		cont = filemap_page_next(&iter);
 
-		if (item_order > min && (item_order <= iter.min || !cont)) {
+		if (length>0 && item_order > min && (item_order <= iter.min || !cont)) {
 			fseek(list->file, page + 8*3, SEEK_SET);
-			vector_t data = filemap_page_read(list, length);
-
-			unsigned long pos = vector_search(&data, item);
-			if (!pos) {
-				vector_free(&data);
-				continue;
+			
+			uint64_t other[2];
+			for (unsigned i=0; i<list->page_size; i++) {
+				fread(&other, 8*2, 1, list->file);
+				
+				if (obj->data_pos == other[0] && item_order == other[1]) {
+					fseek(list->file, -8*2, SEEK_CUR);
+					
+					uint64_t set[2] = {0};
+					fwrite(set, 8*2, 1, list->file);
+					
+					//decrement length
+					length--;
+					fseek(list->file, page+8*2, SEEK_SET);
+					fwrite(&length, 8, 1, list->file);
+					
+					cont = 0;
+					break;
+				}
 			}
-			
-			fseek(list->file, page + 8*3 + 8*2*(pos-1), SEEK_SET);
-			
-			uint64_t set[2] = {0};
-			fwrite(set, 8*2, 1, list->file);
-			
-			mtx_unlock(&list->lock);
-			
-			vector_free(&data);
-			return 1;
 		}
 
 		length = iter.length;
@@ -1476,7 +1478,7 @@ void filemap_object_free(filemap_t* fmap, filemap_object* obj) {
 	if (!obj->exists) return;
 
 	for (unsigned i = 0; i < fmap->fields; i++) {
-		drop(obj->fields[i]);
+		if (obj->fields[i]) drop(obj->fields[i]);
 	}
 
 	drop(obj->fields);

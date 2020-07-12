@@ -15,6 +15,7 @@ extern char* GLOBAL_TEMPLATE;
 #define CONTENT_MAX 50*1024*1024 //50 mb
 #define CLEANUP_INTERVAL 24*3600
 #define WCACHE_INTERVAL 5*60
+#define AUTH_KEYSZ 128
 #define PAGE_SIZE 12
 #define WORD_MIN 1
 #define WORD_MAX 16
@@ -23,8 +24,6 @@ extern char* GLOBAL_TEMPLATE;
 #define QUERY_MAX 32
 typedef enum {GET, POST} method_t;
 typedef enum {url_formdata, multipart_formdata} content_type;
-typedef char* query[2];
-typedef char* header[2];
 typedef struct {
 	char* name;
 	char* mime;
@@ -37,6 +36,7 @@ typedef struct {
 
   vector_t path; //vector of char* segments
   vector_t query; //vector of char* [2], if content type is url formdata
+	vector_t cookies; //parsed cookie header
 	vector_t files; //vector of multipart_file, if content type is multipart formdata
 
   map_t headers; //char* -> char*
@@ -54,12 +54,7 @@ typedef struct {
 typedef struct {
 	filemap_partial_object user;
   mtx_t lock; //transaction lock
-
-	//atomic variants of macos time_t and clock_t
-	atomic_long last_access;
-
-	atomic_ulong last_get;
-	atomic_ulong last_lock;
+	atomic_ulong last_access;
 } user_session;
 typedef enum {
   user_name_i = 0,
@@ -138,9 +133,9 @@ typedef struct {
 typedef struct {
   ctx_t *ctx;
   struct bufferevent *bev; //buffered socket
-  char *client_addr;
 
 	user_session* user_ses;
+	char* auth_tok; //set by router for update
   
   struct {
     char done; //uninitialized req
@@ -157,6 +152,8 @@ typedef struct {
   vector_t requests;
   int closed;
 } session_t;
+void uses_free(user_session* uses);
+user_session* uses_from_idx(ctx_t* ctx, uint64_t idx);
 void cleanup_sessions(ctx_t* ctx);
 cached* ctx_cache_find(ctx_t* ctx, char* name);
 cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len);

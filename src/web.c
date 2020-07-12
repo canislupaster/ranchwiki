@@ -43,38 +43,21 @@ session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen
         ctx->evbase, fd, BEV_OPT_CLOSE_ON_FREE);
   bufferevent_enable(session->bev, EV_READ | EV_WRITE);
 
-  char host[NI_MAXHOST];
-  int rv = getnameinfo(addr, (socklen_t)addrlen, host, sizeof(host), NULL, 0,
-                       NI_NUMERICHOST);
-
-  if (rv != 0) {
-    return NULL;
-  } else {
-    session->client_addr = strdup(host);
-  }
-	
-	//initialize user session
-	char* key = strdup(host);
-	map_insert_result session_res = map_insert_locked(&session->ctx->user_sessions, &key);
-
-	if (!session_res.exists) {
-		*(user_session**)session_res.val = heap(sizeof(user_session));
-		session->user_ses = *(user_session**)session_res.val;
-
-		mtx_init(&session->user_ses->lock, mtx_plain);
-
-		atomic_store(&session->user_ses->last_get, 0);
-		atomic_store(&session->user_ses->last_lock, 0);
-		atomic_store(&session->user_ses->last_access, 0);
-
-		session->user_ses->user.exists = 0;
-	} else {
-		session->user_ses = *(user_session**)session_res.val;
-	}
-	
-	rwlock_unwrite(session->ctx->user_sessions.lock);
+	session->user_ses = NULL;
+	session->auth_tok = NULL;
 
   return session;
+}
+
+void query_free(vector_t* query) {
+  vector_iterator query_iter = vector_iterate(query);
+  while (vector_next(&query_iter)) {
+    char** q = query_iter.x;
+    drop(q[0]);
+    drop(q[1]);
+  }
+
+	vector_free(query);
 }
 
 void req_free(request* req) {
@@ -82,12 +65,8 @@ void req_free(request* req) {
     drop(req->content);
   }
 
-  vector_iterator query_iter = vector_iterate(&req->query);
-  while (vector_next(&query_iter)) {
-    query* q = query_iter.x;
-    drop((*q)[0]);
-    drop((*q)[1]);
-  }
+	query_free(&req->query);
+	query_free(&req->cookies);
 
   vector_iterator mdata_iter = vector_iterate(&req->files);
   while (vector_next(&mdata_iter)) {
@@ -105,7 +84,6 @@ void req_free(request* req) {
     drop(*(char**)header_iter.x);
   }
 
-  vector_free(&req->query);
   vector_free(&req->files);
 	map_free(&req->headers);
 }
@@ -125,20 +103,155 @@ void terminate(session_t *session) {
   }
 
   bufferevent_disable(session->bev, EV_READ);
-
-	mtx_unlock(&session->user_ses->lock);
 	
-  drop(session->client_addr);
+	if (session->auth_tok) drop(session->auth_tok);
   session->closed = 1;
 }
 
-void respond(session_t* session, int stat, char* content, unsigned long len, header* headers, int headers_len) {
+void skip(char** cur) {
+  if (**cur) (*cur)++;
+}
+
+void parse_ws(char** cur) {
+  while (**cur == ' ') (*cur)++;
+}
+
+void skip_until(char** cur, char* delim) {
+  while (!strchr(delim, **cur) && **cur) (*cur)++;
+}
+
+void skip_while(char** cur, char* delim) {
+  while (strchr(delim, **cur) && **cur) (*cur)++;
+}
+
+int skip_newline(char** cur) {
+  if (**cur == '\r') skip(cur);
+  if (**cur == '\n') {
+    skip(cur);
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+char* parse_name(char** cur, char* delim) {
+  char* start = *cur;
+  while (!strchr(delim, **cur) && **cur) (*cur)++;
+
+  char *str = heap(*cur - start + 1);
+  memcpy(str, start, *cur - start);
+  str[*cur - start] = 0;
+
+  return str;
+}
+
+int skip_word(char** cur, const char* word) {
+  if (strncmp(*cur, word, strlen(word))==0) {
+    (*cur) += strlen(word);
+    return 1;
+  } else {
+    return 0;
+  }
+}
+
+//kinda copied from https://nachtimwald.com/2017/09/24/hex-encode-and-decode-in-c/
+//since im too lazy to type all these ifs
+char hexchar(char hex) {
+  if (hex >= '0' && hex <= '9') {
+		return hex - '0';
+	} else if (hex >= 'A' && hex <= 'F') {
+		return hex - 'A' + 10;
+	} else if (hex >= 'a' && hex <= 'f') {
+		return hex - 'a' + 10;
+	} else {
+		return 0;
+	}
+}
+
+void charhex(unsigned char chr, char* out) {
+	char first = (char)(chr % 16u);
+	if (first < 10) out[1] = first+'0';
+	else out[1] = (first-10) + 'A';
+
+	chr /= 16;
+	
+	if (chr < 10) out[0] = chr+'0';
+	else out[0] = (chr-10) + 'A';
+}
+
+//frees original string
+char* percent_decode(char* data, unsigned long* sz) {
+  char buffer[strlen(data)+1]; //temporary buffer, at most as long as data
+  memset(buffer, 0, strlen(data)+1);
+
+  unsigned long cur=0; //write cursor
+
+  char* curdata = data; //copy data ptr
+  
+  while (*curdata) {
+    if (*curdata == '+') {
+      buffer[cur] = ' '; cur++;
+    } else if (*curdata == '%') {
+      skip(&curdata);
+      char x = hexchar(*curdata) * 16;
+      skip(&curdata);
+      x += hexchar(*curdata);
+
+      buffer[cur] = x; cur++;
+    } else {
+      buffer[cur] = *curdata; cur++;
+    }
+
+    curdata++;
+  }
+
+	if (sz) *sz = cur;
+
+  return heapcpy(sz ? *sz : strlen(buffer)+1, buffer); //truncate and copy buffer
+}
+
+char* percent_encode(char* data, unsigned long sz) {
+	char buffer[sz*3];
+  memset(buffer, 0, sz*3);
+
+	char* cursor = buffer;
+
+	for (unsigned long i=0; i<sz; i++) {
+		if (data[i] == ' ') {
+			*cursor = '+';
+		} else if (data[i] > 126 || data[i] < 33
+			|| strchr("%+\",;\\", data[i])) { //https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Set-Cookie
+			
+			*cursor = '%';
+			cursor++;
+			charhex((unsigned char)data[i], cursor);
+			cursor++;
+		} else {
+			*cursor = data[i];
+		}
+
+		cursor++;
+	}
+
+	return heapcpystr(buffer);
+}
+
+void respond(session_t* session, int stat, char* content, unsigned long len, char* (*headers)[2], int headers_len) {
   struct evbuffer* evbuf = bufferevent_get_output(session->bev);
   evbuffer_add_printf(evbuf, "HTTP/1.1 %i %s\r\n", stat, reason(stat));
 
   if (content) {
-    evbuffer_add_printf(evbuf, "Content-Length:%lu\r\n", len);
+    evbuffer_add_printf(evbuf, "Content-Length: %lu\r\n", len);
   }
+
+	if (session->auth_tok) {
+		char* encoded = percent_encode(session->auth_tok, AUTH_KEYSZ);
+    evbuffer_add_printf(evbuf, "Set-Cookie: ranchsession=\"%s\"\r\n", encoded);
+		drop(encoded);
+		
+		drop(session->auth_tok);
+		session->auth_tok = NULL;
+	}
 
   for (int i=0; i<headers_len; i++) {
     evbuffer_add_printf(evbuf, "%s:%s\r\n", headers[i][0], headers[i][1]);
@@ -152,11 +265,11 @@ void respond(session_t* session, int stat, char* content, unsigned long len, hea
 }
 
 void respond_redirect(session_t* session, char* url) {
-	respond(session, 302, "", 0, (header[1]){{"Location", url}}, 1);
+	respond(session, 302, "", 0, &(char*[2]){"Location", url}, 1);
 }
 
 void respond_html(session_t* session, int stat, char* content) {
-  respond(session, stat, content, strlen(content), (header[1]){{"Content-Type", "text/html; charset=UTF-8"}}, 1);
+  respond(session, stat, content, strlen(content), &(char*[2]){"Content-Type", "text/html; charset=UTF-8"}, 1);
 }
 
 void escape_html(char** str) {
@@ -488,52 +601,6 @@ void respond_error(session_t* session, int stat, char* err) {
   respond_template(session, stat, ERROR_TEMPLATE, err, err);
 }
 
-void skip(char** cur) {
-  if (**cur) (*cur)++;
-}
-
-void parse_ws(char** cur) {
-  while (**cur == ' ') (*cur)++;
-}
-
-void skip_until(char** cur, char* delim) {
-  while (!strchr(delim, **cur) && **cur) (*cur)++;
-}
-
-void skip_while(char** cur, char* delim) {
-  while (strchr(delim, **cur) && **cur) (*cur)++;
-}
-
-int skip_newline(char** cur) {
-  if (**cur == '\r') skip(cur);
-  if (**cur == '\n') {
-    skip(cur);
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
-char* parse_name(char** cur, char* delim) {
-  char* start = *cur;
-  while (!strchr(delim, **cur) && **cur) (*cur)++;
-
-  char *str = heap(*cur - start + 1);
-  memcpy(str, start, *cur - start);
-  str[*cur - start] = 0;
-
-  return str;
-}
-
-int skip_word(char** cur, const char* word) {
-  if (strncmp(*cur, word, strlen(word))==0) {
-    (*cur) += strlen(word);
-    return 1;
-  } else {
-    return 0;
-  }
-}
-
 // vector_t parse_list(char* data, char* delim) {
 //   vector_t list = vector_new(sizeof(char*));
 
@@ -544,57 +611,19 @@ int skip_word(char** cur, const char* word) {
   
 // }
 
-//kinda copied from https://nachtimwald.com/2017/09/24/hex-encode-and-decode-in-c/
-//since im too lazy to type all these ifs
-char hexchar(char hex) {
-  if (hex >= '0' && hex <= '9') {
-		return hex - '0';
-	} else if (hex >= 'A' && hex <= 'F') {
-		return hex - 'A' + 10;
-	} else if (hex >= 'a' && hex <= 'f') {
-		return hex - 'a' + 10;
-	} else {
-		return 0;
-	}
-}
-
-//frees original string
-char* percent_decode(char* data) {
-  char buffer[strlen(data)+1]; //temporary buffer, at most as long as data
-  memset(buffer, 0, strlen(data)+1);
-
-  unsigned long cur=0; //write cursor
-
-  char* curdata = data; //copy data ptr
-  
-  while (*curdata) {
-    if (*curdata == '+') {
-      buffer[cur] = ' '; cur++;
-    } else if (*curdata == '%') {
-      skip(&curdata);
-      char x = hexchar(*curdata) * 16;
-      skip(&curdata);
-      x += hexchar(*curdata);
-
-      buffer[cur] = x; cur++;
-    } else {
-      buffer[cur] = *curdata; cur++;
-    }
-
-    curdata++;
-  }
-
-  drop(data);
-  return heapcpy(strlen(buffer)+1, buffer); //truncate and copy buffer
-}
-
 void parse_querystring(char* line, vector_t* vec) {
   while (*line) {
-    char* key = percent_decode(parse_name(&line, "="));
+		char* key_hex = parse_name(&line, "=");
+    char* key = percent_decode(key_hex, NULL);
+		drop(key_hex);
+		
     skip(&line);
-    char* val = percent_decode(parse_name(&line, "& "));
+		
+		char* val_hex = parse_name(&line, "& ");
+    char* val = percent_decode(val_hex, NULL);
+		drop(val_hex);
     
-    vector_pushcpy(vec, &(query){key, val});
+    vector_pushcpy(vec, &(char*[2]){key, val});
 
     if (*line == ' ') break;
     skip(&line); //skip &
@@ -656,7 +685,8 @@ int request_parse(char* line, request* req) {
   parse_ws(&line);
   
   req->path = vector_new(sizeof(char*));
-  req->query = vector_new(sizeof(query));
+  req->query = vector_new(sizeof(char*[2]));
+	req->cookies = vector_new(sizeof(char*[2]));
   req->files = vector_new(sizeof(multipart_data));
   
   req->content = NULL;
@@ -702,19 +732,17 @@ int request_parse(char* line, request* req) {
 vector_t parse_header_value(char* val) {
 	vector_t vec = vector_new(sizeof(char*[2]));
 
-	vector_pushcpy(&vec, &(char*[]){heapcpy(1, ""), parse_name(&val, ",;")});
-
-	while (*val && *val == ',') {
-		val++;
-		vector_pushcpy(&vec, &(char*[]){heapcpy(1, ""), parse_name(&val, ",;")});
-	}
-
+	parse_ws(&val);
+	
 	while (*val) {
-		if (*val==';') val++;
-
-		parse_ws(&val);
-
-		char* name = parse_name(&val, "=");
+		char* name = parse_name(&val, "=;,");
+		if (*val != '=') {
+			vector_pushcpy(&vec, &(char*[]){heapcpystr(""), name}); //cmon its easy to free
+			
+			val++;
+			parse_ws(&val);
+			continue;
+		}
 
 		while (*val && (*val == '=' || *val == ',')) {
 			val++;
@@ -729,15 +757,17 @@ vector_t parse_header_value(char* val) {
 			}
 		}
 		
+		if (*val == ';') val++;
+		
 		drop(name);
+		parse_ws(&val);
 	}
 
 	return vec;
 }
 
 //drops the vector
-//if extensibility is needed, follow the pattern used for query extraction
-char* header_find_value(vector_t* val, char* key) {
+char* query_extract_value(vector_t* val, char* key) {
 	vector_iterator iter = vector_iterate(val);
 
 	char* res = NULL;
@@ -802,7 +832,7 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
 				}
 
 				vector_t val = parse_header_value(disposition);
-				char* disposition_name = header_find_value(&val, "name");
+				char* disposition_name = query_extract_value(&val, "name");
 				drop(disposition);
 				
 				char* data_start = content;
@@ -839,7 +869,6 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
 
     return 1;
   } else {
-		mtx_unlock(&session->user_ses->lock);
     return 0; //wait for more to arrive
   }
 }
@@ -851,7 +880,6 @@ void route(session_t* session, request* req);
    checked. */
 void readcb(struct bufferevent *bev, void* ctx) {
   session_t *session = (session_t *)ctx;
-	mtx_lock(&session->user_ses->lock);
 
   struct evbuffer* evbuf = bufferevent_get_input(bev);
   
@@ -892,9 +920,9 @@ void readcb(struct bufferevent *bev, void* ctx) {
 					session->parser.req.ctype = multipart_formdata;
 
 					vector_t ctype_val = parse_header_value(*ctype);
-					session->parser.multipart_boundary = header_find_value(&ctype_val, "boundary");
+					session->parser.multipart_boundary = query_extract_value(&ctype_val, "boundary");
 
-          char* prefixed = heapstr("--%s", session->parser.multipart_boundary);
+					char* prefixed = heapstr("--%s", session->parser.multipart_boundary);
           drop(session->parser.multipart_boundary);
           session->parser.multipart_boundary = prefixed;
 
@@ -937,13 +965,23 @@ void readcb(struct bufferevent *bev, void* ctx) {
 					terminate(session);
 					return;
 				}
+			} else if (skip_word(&cur, "Cookie:")) {
+				parse_ws(&cur);
+				query_free(&session->parser.req.cookies);
+				session->parser.req.cookies = parse_header_value(cur);
       } else {
         char* name = parse_name(&cur, ":");
         skip(&cur);
         parse_ws(&cur);
         char* val = parse_name(&cur, "");
 
-        map_insertcpy(&session->parser.req.headers, &name, &val);
+        map_insert_result res = map_insert(&session->parser.req.headers, &name);
+				if (res.exists) {
+					drop(name);
+					drop(*(char**)res.val);
+				}
+
+				*(char**)res.val = val;
       }
     }
 
@@ -953,16 +991,43 @@ void readcb(struct bufferevent *bev, void* ctx) {
   //respond to pending requests
   vector_iterator req_iter = vector_iterate(&session->requests);
   while (vector_next(&req_iter)) {
-    route(session, req_iter.x);
+		request* req = req_iter.x;
+
+		//initialize/find user session
+		vector_t auth = query_find(&req->cookies, (char*[]){"ranchsession"}, 1, 1);
+
+		if (auth.length==1) {
+			char* strkey = vector_getstr(&auth, 0);
+
+			map_sized_t key;
+			key.bin = percent_decode(strkey, &key.size);
+
+			if (key.size==AUTH_KEYSZ) {
+				user_session** ses = map_find(&session->ctx->user_sessions, &key);
+				if (ses) {
+					session->user_ses = *ses;
+					mtx_lock(&session->user_ses->lock);
+				}
+			}
+
+			drop(key.bin);
+		}
+
+		vector_free(&auth);
+
+    route(session, req);
 
 		//store last access for session expiry
-		atomic_store(&session->user_ses->last_access, time(NULL));
+		if (session->user_ses) {
+			atomic_store(&session->user_ses->last_access, (unsigned long)time(NULL));
+			mtx_unlock(&session->user_ses->lock);
+			session->user_ses = NULL;
+		}
 
     req_free(req_iter.x);
   }
 
   vector_clear(&session->requests);
-	mtx_unlock(&session->user_ses->lock);
 }
 
 void listen_error(struct evconnlistener* listener, void* ctx) {
@@ -978,11 +1043,13 @@ void eventcb(struct bufferevent *bev, short events, void* ctx) {
   session_t *session = (session_t *)ctx;
   
   if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT)) {
-		mtx_lock(&session->user_ses->lock);
+		if (session->user_ses) mtx_lock(&session->user_ses->lock);
 		
     bufferevent_free(session->bev);
     if (!session->closed) terminate(session);
-    drop(session);
+		if (session->user_ses) mtx_unlock(&session->user_ses->lock);
+
+		drop(session);
 	}
 }
 
@@ -993,7 +1060,6 @@ void acceptcb(struct evconnlistener *listener, int fd, struct sockaddr *addr,
   session_t *session;
 
   session = create_session(ctx, fd, addr, addrlen);
-	if (!session) return;
 
   struct timeval tout = {.tv_sec=TIMEOUT, .tv_usec=0};
   bufferevent_set_timeouts(session->bev, &tout, NULL);

@@ -104,9 +104,8 @@ int util_main(void* udata) {
 
       userdata_t* data = (userdata_t*)user.fields[user_data_i];
       data->perms = (char)strtol(vector_getstr(&arg, 2), NULL, 0);
-
-      user_session** ses_ref = map_find(&ctx->user_sessions_by_idx, &list_user.index);
-      user_session* ses = ses_ref ? *ses_ref : NULL;
+			
+			user_session* ses = uses_from_idx(ctx, list_user.index);
       if (ses) mtx_lock(&ses->lock);
 
       filemap_object new_u = filemap_push(&ctx->user_fmap, user.fields, user.lengths);
@@ -123,7 +122,7 @@ int util_main(void* udata) {
 			
 		} else if (strcmp(vector_getstr(&arg, 0), "diff")==0 && arg.length==3) {
 			char* path_str = vector_getstr(&arg, 1);
-			int maxd = strtol(vector_getstr(&arg, 2), NULL, 10);
+			int maxd = (int)strtol(vector_getstr(&arg, 2), NULL, 10);
 			
 			vector_t path = vector_new(sizeof(char*));
 			if (!parse_wiki_path(path_str, &path) || maxd==0) {
@@ -291,11 +290,11 @@ int main(int argc, char** argv) {
   ctx.user_sessions.free = free_string;
 
   map_distribute(&ctx.user_sessions);
-  map_configure_string_key(&ctx.user_sessions, sizeof(user_session*));
+  map_configure_sized_key(&ctx.user_sessions, sizeof(user_session*));
 
   ctx.user_sessions_by_idx = map_new();
   map_distribute(&ctx.user_sessions_by_idx);
-  map_configure_ulong_key(&ctx.user_sessions_by_idx, sizeof(user_session*));
+  map_configure_uint64_key(&ctx.user_sessions_by_idx, AUTH_KEYSZ); //key for user_sessions
 
   ctx.article_lock = map_new();
   ctx.article_lock.free = free_sized;
