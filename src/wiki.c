@@ -304,8 +304,6 @@ void add_diff(text_t* txt, diff_t* d, char* current_str) {
   fseek(txt->file, 0, SEEK_SET);
   fwrite(&one, 1, 1, txt->file);
   fwrite(&new_current, 8, 1, txt->file);
-
-  fclose(txt->file);
 }
 
 void read_txt(text_t* txt, uint64_t start, uint64_t max) {
