@@ -1992,7 +1992,6 @@ void route(session_t* session, request* req) {
 			url = flatten_url(&path);
 		}
 		
-
 		ctx_cache_remove(session->ctx, wpath.data);
 
 		unlock_article(session->ctx, flattened.data, flattened.length);

@@ -267,7 +267,7 @@ void ctx_cache_remove(ctx_t* ctx, char* name) {
 
     if (acc == 1) {
       drop(cache->data);
-      map_remove(&ctx->cached, &name);
+      map_remove_unlocked(&ctx->cached, &name);
     }
 		
 		rwlock_unwrite(ctx->cached.lock);
