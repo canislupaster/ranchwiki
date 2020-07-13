@@ -19,7 +19,7 @@ const char* GLOBAL_TEMPLATE = "global"; //name of global template
 #define CLEANUP_INTERVAL 24*3600
 #define WCACHE_INTERVAL 5*60
 #define CACHE_EXPIRY 3600 //seconds after which to expire cache's weighting 
-#define CACHE_MIN 100 //accesses per hour to qualify in cache
+#define CACHE_MIN 1000 //accesses per hour to qualify in cache
 #define AUTH_KEYSZ 128
 
 #define PAGE_SIZE 12
@@ -107,8 +107,6 @@ typedef struct {
   atomic_ulong accessors;
   atomic_ulong accesses;
   time_t first_cache;
-
-  char delete;
 
   char* data;
   unsigned long len;
@@ -208,16 +206,17 @@ void cleanup_sessions(ctx_t* ctx) {
 }
 
 cached* ctx_cache_find(ctx_t* ctx, char* name) {
-  cached* cache = map_find(&ctx->cached, &name);
-   
-   if (cache && !cache->delete)
-    atomic_fetch_add(&cache->accessors, 1);
-
+	rwlock_read(ctx->cached.lock);
+	cached* cache = map_find_unlocked(&ctx->cached, &name);
+	
+	if (cache) atomic_fetch_add(&cache->accessors, 1);
+	rwlock_unread(ctx->cached.lock);
+	
   return cache;
 }
 
 cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len) {
-  cached new = {.data=data, .len=len, .delete=0};
+  cached new = {.data=data, .len=len};
   new.first_cache = time(NULL);
   atomic_init(&new.accesses, 0);
   atomic_init(&new.accessors, 1);
@@ -240,32 +239,38 @@ void ctx_cache_done(ctx_t* ctx, cached* cache, char* name) {
 
   unsigned long accs = atomic_fetch_add(&cache->accesses, 1)+1;
 
-  cache->delete = accs*3600/difftime(t, cache->first_cache) < CACHE_MIN;
-  unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
+	int delete = accs*3600/difftime(t, cache->first_cache) < CACHE_MIN;
+	if (delete) rwlock_write(ctx->cached.lock);
+	
+	unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
 
   //small race...
-  if (acc == 0 && difftime(t, cache->first_cache) >= CACHE_EXPIRY) {
-    cache->len = t;
+  if (acc == 1 && difftime(t, cache->first_cache) >= CACHE_EXPIRY) {
+    cache->first_cache = t;
     atomic_store(&cache->accesses, 1);
 
-  } else if (cache->delete && acc==0) {
+  } else if (delete && acc==1) {
     drop(cache->data);
-    map_remove(&ctx->cached, &name);
+    map_remove_unlocked(&ctx->cached, &name);
   }
+	
+	if (delete) rwlock_unwrite(ctx->cached.lock);
 }
 
 void ctx_cache_remove(ctx_t* ctx, char* name) {
   cached* cache = map_find(&ctx->cached, &name);
   if (cache) {
     atomic_fetch_add(&cache->accessors, 1);
-    cache->delete = 1;
 
+		rwlock_write(ctx->cached.lock);
     unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
 
-    if (acc == 0) {
+    if (acc == 1) {
       drop(cache->data);
       map_remove(&ctx->cached, &name);
     }
+		
+		rwlock_unwrite(ctx->cached.lock);
   }
 }
 

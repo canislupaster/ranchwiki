@@ -89,8 +89,6 @@ typedef struct {
   atomic_ulong accesses;
   time_t first_cache;
 
-  char delete;
-
   char* data;
   unsigned long len;
 } cached;

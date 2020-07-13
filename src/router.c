@@ -1038,7 +1038,8 @@ int route_article(session_t* session, request* req, filemap_object* obj) {
 
 void session_auth(session_t* session, filemap_partial_object idx) {
 	if (session->user_ses) {
-		char* old_key = map_remove_locked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
+		rwlock_write(session->ctx->user_sessions_by_idx.lock);
+		char* old_key = map_remove_unlocked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
 		//otherwise has been removed during session (ex. during /login)
 		if (old_key) {
 			map_remove(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=old_key});
@@ -1212,7 +1213,8 @@ void route(session_t* session, request* req) {
 		
 		user_session* uses = NULL;
 
-		char* old_ses_key = map_remove_locked(&session->ctx->user_sessions_by_idx, &user_ref.index);
+		rwlock_write(session->ctx->user_sessions_by_idx.lock);
+		char* old_ses_key = map_remove_unlocked(&session->ctx->user_sessions_by_idx, &user_ref.index);
 
     if (old_ses_key) {
 			uses = map_removeptr(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=old_ses_key});
@@ -1479,7 +1481,8 @@ void route(session_t* session, request* req) {
   } else if (strcmp(base, "logout") == 0) {
 
     if (session->user_ses) {
-      char* key = map_remove_locked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
+			rwlock_write(session->ctx->user_sessions_by_idx.lock);
+      char* key = map_remove_unlocked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
 			
 			if (key)
 				map_remove(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=key});
