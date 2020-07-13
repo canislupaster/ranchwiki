@@ -222,7 +222,17 @@ cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len) {
   atomic_init(&new.accesses, 0);
   atomic_init(&new.accessors, 1);
 
-  return map_insertcpy(&ctx->cached, &name, &new).val;
+  map_insert_result insres = map_insertcpy_noexist(&ctx->cached, &name, &new);
+
+	//in case of high traffic, use map lock as synchronization
+	//hah! high traffic!??! never lmao
+	if (insres.exists) {
+		drop(data);
+		drop(name);
+	}
+
+	return insres.val;
+	//oh boy i am much pious with my shitey sitey
 }
 
 void ctx_cache_done(ctx_t* ctx, cached* cache, char* name) {
@@ -275,7 +285,7 @@ cached* ctx_fopen(ctx_t* ctx, char* name) {
 
     fclose(f);
 
-    cache = ctx_cache_new(ctx, name, data, len);
+    cache = ctx_cache_new(ctx, heapcpystr(name), data, len);
   }
 
   return cache;

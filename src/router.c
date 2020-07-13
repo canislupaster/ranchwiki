@@ -35,7 +35,7 @@ cached* article_current(ctx_t* ctx, vector_t* filepath) {
 	if (!current_cache) {
 		text_t txt = txt_new(filepath->data);
 		read_txt(&txt, 0, 0);
-		current_cache = ctx_cache_new(ctx, filepath->data, heapcpystr(txt.current), strlen(txt.current));
+		current_cache = ctx_cache_new(ctx, heapcpystr(filepath->data), heapcpystr(txt.current), strlen(txt.current));
 
 		txt_free(&txt);
 	}
