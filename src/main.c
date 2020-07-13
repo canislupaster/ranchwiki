@@ -257,6 +257,7 @@ int main(int argc, char** argv) {
 	global_ctx = &ctx;
 
   struct sigaction sact;
+	sact.sa_flags = SA_SIGINFO;
   sact.sa_sigaction = &sighandler;
 	
   sigaction(SIGSEGV, &sact, NULL);
