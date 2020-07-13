@@ -35,7 +35,7 @@ cached* article_current(ctx_t* ctx, vector_t* filepath) {
 	if (!current_cache) {
 		text_t txt = txt_new(filepath->data);
 		read_txt(&txt, 0, 0);
-		current_cache = ctx_cache_new(ctx, filepath->data, heapcpystr(txt.current), strlen(txt.current));
+		current_cache = ctx_cache_new(ctx, heapcpystr(filepath->data), heapcpystr(txt.current), strlen(txt.current));
 
 		txt_free(&txt);
 	}
@@ -200,10 +200,10 @@ int render_article(ctx_t* ctx, char** article, int render, vector_t* refs, vecto
 			case '*': {
 				if (bold && render) {
 					vector_insertstr(&vec, iter.i, "</b>");
-					iter.i += strlen("</b>")-1;
+					iter.i += strlen("</b>");
 				} else if (render) {
 					vector_insertstr(&vec, iter.i-1, "<b>");
-					iter.i += strlen("<b>")-1;
+					iter.i += strlen("<b>");
 				}
 
 				bold=!bold;
@@ -772,7 +772,7 @@ void article_group_insert(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 		filemap_partial_object* new_group = iter.x;
 
 		if (!new_group->exists) {
-			articledata_t groupdata = {.path_length = path->length-iter.i,
+			articledata_t groupdata = {.path_length = (uint32_t)(path->length-iter.i),
 																	.ty = article_group, .items = 1,
 																	.contributors = last,
 																	.edit_time=(uint64_t)time(NULL)};
@@ -938,6 +938,7 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 	vector_t groups = vector_new(sizeof(filemap_partial_object));
 	if (!article_lock_groups(ctx, path, flattened, &groups)) {
 		filemap_object_free(&ctx->article_fmap, &idx);
+		vector_free(&referenced_by);
 		vector_free(&groups);
 		return 0;
 	}
@@ -962,7 +963,7 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 				(char*)&user_idx, html_cache},
 
 			(uint64_t[]){sizeof(articledata_t),
-				referenced_by.length*referenced_by.size,
+				referenced_by.length*8,
 				flattened->length, 8, strlen(html_cache)+1});
 
 	filemap_list_update(&ctx->article_id, article, &text);
@@ -2207,9 +2208,6 @@ void route(session_t* session, request* req) {
 		int img = data->ty == article_img;
 		data->ty = article_dead;
 		
-		vector_t wpath = flatten_wikipath(&req->path);
-		ctx_cache_remove(session->ctx, wpath.data);
-		
 		filemap_object new_obj = filemap_push(&session->ctx->article_fmap, obj.fields, obj.lengths);
 		filemap_list_update(&session->ctx->article_id, &article, &new_obj);
 		filemap_delete_object(&session->ctx->article_fmap, &obj);
@@ -2224,6 +2222,9 @@ void route(session_t* session, request* req) {
 
 		//remove from alphabetical listing
 		filemap_ordered_remove_id(&session->ctx->articles_alphabetical, path_abc_order(vector_getstr(&req->path, req->path.length-1)), &article);
+		
+		vector_t wpath = flatten_wikipath(&req->path);
+		ctx_cache_remove(session->ctx, wpath.data);
 
 		if (!img) {
 			text_t txt = txt_new(wpath.data);

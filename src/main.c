@@ -355,6 +355,7 @@ int main(int argc, char** argv) {
 
       if (strcmp(filename, GLOBAL_TEMPLATE) == 0) {
         ctx.global = data;
+				drop(filename);
       } else {
         template_t template = template_new(data);
         map_insertcpy(&ctx.templates, &filename, &template);

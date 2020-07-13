@@ -1064,7 +1064,7 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 			
 			uint64_t other[2];
 			for (unsigned i=0; i<list->page_size; i++) {
-				fread(&other, 8*2, 1, list->file);
+				fread(other, 8*2, 1, list->file);
 				
 				if (obj->data_pos == other[0] && item_order == other[1]) {
 					fseek(list->file, -8*2, SEEK_CUR);
@@ -1128,7 +1128,6 @@ void filemap_ordered_remove(filemap_ordered_list_t* list,
 	mtx_unlock(&list->lock);
 }
 
-//raw data index for faster internal storage
 filemap_partial_object filemap_get_idx(filemap_list_t* list, uint64_t i) {
 	filemap_partial_object res;
 
@@ -1136,7 +1135,7 @@ filemap_partial_object filemap_get_idx(filemap_list_t* list, uint64_t i) {
 
 	mtx_lock(&list->lock);
 
-	if (list->length * 8 + 8 < res.index) {
+	if (res.index < 8 || list->length * 8 + 8 < res.index) {
 		mtx_unlock(&list->lock);
 
 		res.exists = 0;
