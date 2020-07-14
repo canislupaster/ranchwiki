@@ -1683,7 +1683,6 @@ void route(session_t* session, request* req) {
     vector_t out_path = make_path(&path);
 
 		FILE* f = fopen(out_path.data, "w");
-		fwrite("\0", 1, 1, f);
 		fwrite(content->content, content->len, 1, f);
 		fclose(f);
 
@@ -2378,8 +2377,7 @@ void route(session_t* session, request* req) {
 			case article_img: {
 				cached* cache = ctx_fopen(session->ctx, wpath.data);
 
-				//skip prefix
-				respond(session, 200, cache->data+1, cache->len, &(char*[2]){"Content-Type", obj.fields[article_html_i]}, 1);
+				respond(session, 200, cache->data, cache->len, &(char*[2]){"Content-Type", obj.fields[article_html_i]}, 1);
 
 				ctx_cache_done(session->ctx, cache, wpath.data);
 

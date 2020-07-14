@@ -392,7 +392,7 @@ void filemap_resize(filemap_index_t* index) {
 
 				hash = do_hash(index, field, f_size);
 
-				if (hash % (index->slots * 2) != i) {	 // will either be i or slots-1+i (next modular multiple of i)
+				if (hash % (index->slots * 2) == index->slots-1+i) { //might not have same hash
 					// seek back to pos, set to zero (since we are moving item)
 					fseek(index->file, slot_pos, SEEK_SET);
 
@@ -490,7 +490,11 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 
 			if (index->data->alias) {
 				data_pos = filemap_list_value(index->data->alias, data_pos);
-				if (data_pos == 0) continue;
+				
+				if (data_pos == 0) {
+					probes++;
+					continue;
+				}
 			}
 
 			mtx_lock(&index->data->lock);
