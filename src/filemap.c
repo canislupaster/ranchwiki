@@ -392,7 +392,7 @@ void filemap_resize(filemap_index_t* index) {
 
 				hash = do_hash(index, field, f_size);
 
-				if (hash % (index->slots * 2) == index->slots-1+i) { //might not have same hash
+				if (hash % (index->slots * 2) == index->slots+i) { //might not have same hash
 					// seek back to pos, set to zero (since we are moving item)
 					fseek(index->file, slot_pos, SEEK_SET);
 
