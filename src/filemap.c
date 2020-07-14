@@ -490,7 +490,7 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 
 			if (index->data->alias) {
 				data_pos = filemap_list_value(index->data->alias, data_pos);
-				if (obj.data_pos == 0) continue;
+				if (data_pos == 0) continue;
 			}
 
 			mtx_lock(&index->data->lock);

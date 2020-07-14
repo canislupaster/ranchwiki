@@ -915,7 +915,7 @@ uint64_t path_abc_order(char* name) {
 }
 
 int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
-	vector_t* path, vector_t* flattened, uint64_t user_idx, char* html_cache) {
+	vector_t* path, vector_t* flattened, uint64_t user_idx, char* html_cache, uint64_t edit_time) {
 
 	filemap_object idx = filemap_findcpy(&ctx->article_by_name,
 			flattened->data, flattened->length);
@@ -949,12 +949,10 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 	article_group_insert(ctx, &groups, path, flattened, user_idx, article);
 	vector_free(&groups);
 
-	uint64_t creation_time = (uint64_t)time(NULL);
-
 	articledata_t data = {
 		.path_length = (uint32_t)path->length, .ty = ty,
 			.referenced_by = referenced_by.length,
-			.contributors=1, .edit_time=creation_time};
+			.contributors=1, .edit_time=edit_time};
 
 	filemap_object text = filemap_push(
 			&ctx->article_fmap,
@@ -972,7 +970,7 @@ int article_new(ctx_t* ctx, filemap_partial_object* article, article_type ty,
 
 	filemap_insert(&ctx->article_by_name, &text_ref);
 
-	filemap_ordered_insert(&ctx->articles_newest, UINT64_MAX-creation_time, &text_ref);
+	filemap_ordered_insert(&ctx->articles_newest, UINT64_MAX-edit_time, &text_ref);
 
 	uint64_t abc_order = path_abc_order(vector_getstr(path, path->length-1));
 	filemap_ordered_insert(&ctx->articles_alphabetical, abc_order, &text_ref);
@@ -1562,7 +1560,7 @@ void route(session_t* session, request* req) {
 
 		filemap_partial_object article;
 		if (!article_new(session->ctx, &article, article_text,
-				&path, &flattened, session->user_ses->user.index, html_cache)) {
+				&path, &flattened, session->user_ses->user.index, html_cache, (uint64_t)time(NULL))) {
 
 			respond_template(session, 200, "new", "New article", 1, 1,
 					"Article with that path already exists",
@@ -1666,7 +1664,7 @@ void route(session_t* session, request* req) {
 
 		filemap_partial_object article;
 		if (!article_new(session->ctx, &article, article_img,
-				&path, &flattened, session->user_ses->user.index, content->mime)) {
+				&path, &flattened, session->user_ses->user.index, content->mime, (uint64_t)time(NULL))) {
 
 			respond_template(session, 200, "new", "New article", 1, 1,
 					"Article with that path already exists",
@@ -1685,6 +1683,7 @@ void route(session_t* session, request* req) {
     vector_t out_path = make_path(&path);
 
 		FILE* f = fopen(out_path.data, "w");
+		fwrite("\0", 1, 1, f);
 		fwrite(content->content, content->len, 1, f);
 		fclose(f);
 
@@ -2379,7 +2378,8 @@ void route(session_t* session, request* req) {
 			case article_img: {
 				cached* cache = ctx_fopen(session->ctx, wpath.data);
 
-				respond(session, 200, cache->data, cache->len, &(char*[2]){"Content-Type", obj.fields[article_html_i]}, 1);
+				//skip prefix
+				respond(session, 200, cache->data+1, cache->len, &(char*[2]){"Content-Type", obj.fields[article_html_i]}, 1);
 
 				ctx_cache_done(session->ctx, cache, wpath.data);
 

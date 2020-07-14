@@ -68,6 +68,50 @@ void sighandler(int sig, siginfo_t* info, void* arg) {
 	save_ctx(global_ctx);
 }
 
+void reindex(ctx_t* ctx, char* dirpath, vector_t* wpath) {
+	tinydir_dir dir;
+	tinydir_open(&dir, dirpath);
+
+	for (;dir.has_next; tinydir_next(&dir)) {
+		tinydir_file file;
+		tinydir_readfile(&dir, &file);
+
+		if (strcmp(file.name, ".")==0 || strcmp(file.name, "..")==0 || strcmp(file.name, "./")==0)
+			continue;
+		
+		vector_pushcpy(wpath, file.name);
+		
+		if (file.is_dir) {
+			reindex(ctx, file.path, wpath);
+		} else {
+			text_t txt = txt_new(file.path);
+			
+			char first;
+			fseek(txt.file, 0, SEEK_SET);
+			fread(&first, 1, 1, txt.file);
+			
+			//image
+			if (first == 0) {
+				//make article.... contributor???
+			} else {
+				read_txt(&txt, 0, 1);
+				
+				diff_t* d = vector_get(&txt.diffs, 0);
+				filemap_partial_object ret;
+				
+				vector_t flattened = flatten_path(&wpath);
+				//leaving this here for now
+				//render_article(
+				//article_new(ctx, &ret, article_text, &wpath, &flattened, d->author, )
+			}
+			
+			txt_free(&txt);
+		}
+		
+		vector_pop(wpath);
+	}
+}
+
 int util_main(void* udata) {
 	printf("util started\n");
 
