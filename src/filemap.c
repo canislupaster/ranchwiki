@@ -384,7 +384,7 @@ void filemap_resize(filemap_index_t* index) {
 				char field[f_size];
 				if (f_size > 0) {	 // this is neccesary :)
 					if (fread(field, (size_t)f_size, 1, index->data->data) < 1) {
-						err(1, "corrupted database, field %i does not exist", index->field);
+						fprintf(stderr, "corrupted database, field %i does not exist", index->field);
 					}
 				}
 
