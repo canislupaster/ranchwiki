@@ -1936,7 +1936,7 @@ void route(session_t* session, request* req) {
 
 		if (content_change || path_change) {
 
-			filemap_ordered_remove_id(&session->ctx->articles_newest, data->edit_time, &article);
+			filemap_ordered_remove_id(&session->ctx->articles_newest, UINT64_MAX-data->edit_time, &article_ref);
 
 			data->edit_time = (uint64_t)time(NULL);
 			data->referenced_by = new_referenced_by.length;
@@ -1953,10 +1953,10 @@ void route(session_t* session, request* req) {
 				idx_obj = filemap_index_obj(&new_obj, &new_article);
 			} else {
 				filemap_list_update(&session->ctx->article_id, &article, &new_obj);
-				idx_obj = filemap_index_obj(&new_obj, &new_article);
+				idx_obj = filemap_index_obj(&new_obj, &article);
 			}
 
-			filemap_ordered_insert(&session->ctx->articles_newest, data->edit_time, &idx_obj);
+			filemap_ordered_insert(&session->ctx->articles_newest, UINT64_MAX-data->edit_time, &idx_obj);
 
 			filemap_delete_object(&session->ctx->article_fmap, &obj);
 		}
@@ -1986,6 +1986,8 @@ void route(session_t* session, request* req) {
 
 			uint64_t abc_order = path_abc_order(vector_getstr(&new_path, new_path.length-1));
 			filemap_ordered_insert(&session->ctx->articles_alphabetical, abc_order, &idx_obj);
+			
+			filemap_list_remove(&session->ctx->article_id, &article);
 
 			vector_free(&referenced_by);
 		} else {

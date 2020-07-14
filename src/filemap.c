@@ -915,7 +915,7 @@ uint64_t filemap_page_insert(filemap_ordered_list_t* list, uint64_t length, uint
 		fseek(list->file, -8 * 2, SEEK_CUR); //insert before if havent reached end
 		pos = ftell(list->file);
 
-		vector_t shift = filemap_page_read(list, length - i);
+		vector_t shift = filemap_page_read(list, length - i + 1);
 
 		fseek(list->file, pos, SEEK_SET);
 		fwrite((uint64_t[]){item_order, data_pos}, 8 * 2, 1, list->file);
@@ -1048,46 +1048,58 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 	filemap_page_iterator iter = filemap_page_iterate(list);
 
 	int cont = 1;
+	vector_t pages = vector_new(sizeof(uint64_t));
 
 	mtx_lock(&list->lock);
 	filemap_page_next(&iter);
 
-	uint64_t length = iter.length;
-	uint64_t page = iter.page;
 	uint64_t min = iter.min;
+	vector_pushcpy(&pages, &iter.page);
 
 	while (cont) {
 		cont = filemap_page_next(&iter);
 
-		if (length>0 && item_order > min && (item_order <= iter.min || !cont)) {
-			fseek(list->file, page + 8*3, SEEK_SET);
+		if (item_order >= min && (item_order <= iter.min || !cont)) {
+			cont = 1;
+			while (cont && pages.length>0) {
+				uint64_t page = *(uint64_t*)vector_get(&pages, pages.length-1);
+				vector_pop(&pages);
+				
+				fseek(list->file, page + 8*2, SEEK_SET);
+				
+				uint64_t length;
+				fread(&length, 8, 1, list->file);
 
-			uint64_t other[2];
-			for (unsigned i=0; i<list->page_size; i++) {
-				fread(other, 8*2, 1, list->file);
+				uint64_t other[2];
+				for (unsigned i=0; i<list->page_size; i++) {
+					fread(other, 8*2, 1, list->file);
 
-				if (obj->data_pos == other[0] && item_order == other[1]) {
-					fseek(list->file, -8*2, SEEK_CUR);
+					if (item_order == other[0] && obj->data_pos == other[1]) {
+						fseek(list->file, -8*2, SEEK_CUR);
 
-					uint64_t set[2] = {0};
-					fwrite(set, 8*2, 1, list->file);
+						uint64_t set[2] = {0};
+						fwrite(set, 8*2, 1, list->file);
 
-					//decrement length
-					length--;
-					fseek(list->file, page+8*2, SEEK_SET);
-					fwrite(&length, 8, 1, list->file);
+						//decrement length
+						length--;
+						fseek(list->file, page+8*2, SEEK_SET);
+						fwrite(&length, 8, 1, list->file);
 
-					cont = 0;
-					break;
+						vector_free(&pages);
+						mtx_unlock(&list->lock);
+						return 1;
+					} else if (other[1] == 0) {
+						break;
+					}
 				}
 			}
 		}
 
-		length = iter.length;
-		page = iter.page;
+		vector_pushcpy(&pages, &iter.page);
 		min = iter.min;
 	}
-
+	
+	vector_free(&pages);
 	mtx_unlock(&list->lock);
 	return 0;
 }
@@ -1202,7 +1214,7 @@ vector_t filemap_ordered_page(filemap_ordered_list_t* list, uint64_t start_page,
 	return vec;
 }
 
-void filemap_list_remove(filemap_t* filemap, filemap_list_t* list, filemap_partial_object* obj) {
+void filemap_list_remove(filemap_list_t* list, filemap_partial_object* obj) {
 	mtx_lock(&list->lock);
 
 	// set original index to zero to indicate slot is empty
@@ -1234,7 +1246,7 @@ void filemap_list_update_ref(filemap_list_t* list, filemap_partial_object* parti
 
 void filemap_list_remove_ref(filemap_t* filemap, filemap_list_t* list, filemap_partial_object* partial) {
 	filemap_partial_object temp = {.index = partial->data_pos};
-	filemap_list_remove(filemap, list, &temp);
+	filemap_list_remove(list, &temp);
 }
 
 filemap_iterator filemap_list_iterate(filemap_list_t* list) {

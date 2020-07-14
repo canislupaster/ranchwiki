@@ -121,6 +121,7 @@ filemap_ord_partial_object filemap_ordered_insert(filemap_ordered_list_t* list,
 																									filemap_object* obj);
 int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order, filemap_partial_object* obj);
 filemap_partial_object filemap_get_idx(filemap_list_t* list, uint64_t i);
+void filemap_list_remove(filemap_list_t* list, filemap_partial_object* obj);
 void filemap_list_update(filemap_list_t* list, filemap_partial_object* partial, filemap_object* obj);
 filemap_iterator filemap_list_iterate(filemap_list_t* list);
 uint64_t filemap_list_pos(uint64_t idx);
