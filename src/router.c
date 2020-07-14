@@ -1021,13 +1021,15 @@ int route_article(session_t* session, request* req, filemap_object* obj) {
 		} else {
 			char* err = heapstr("%s does not exist", path_formatted.data);
 			respond_error(session, 404, err);
+			drop(err);
 		}
 
 		vector_free(&flattened);
 		vector_free(&path_formatted);
 
-		if (obj->exists)
+		if (obj->exists) {
 			filemap_object_free(&session->ctx->article_fmap, obj);
+		}
 
 		return 0;
 	}
@@ -1951,6 +1953,11 @@ void route(session_t* session, request* req) {
 			if (path_change) {
 				new_article = filemap_add(&session->ctx->article_id, &new_obj);
 				idx_obj = filemap_index_obj(&new_obj, &new_article);
+				
+				//remove from indexes before deleting object
+				filemap_remove(&session->ctx->article_by_name, flattened.data, flattened.length);
+				filemap_list_remove(&session->ctx->article_id, &article);
+
 			} else {
 				filemap_list_update(&session->ctx->article_id, &article, &new_obj);
 				idx_obj = filemap_index_obj(&new_obj, &article);
@@ -1977,9 +1984,7 @@ void route(session_t* session, request* req) {
 			if (article_lock_groups(session->ctx, &path, &flattened, &old_groups))
 				article_group_remove(session->ctx, &old_groups, &path, &flattened, &article);
 			vector_free(&old_groups);
-			
-			filemap_remove(&session->ctx->article_by_name, flattened.data, flattened.length);
-			
+						
 			url = flatten_url(&new_path);
 			vector_t referenced_by = {.data=obj.fields[article_items_i], .size=8, .length=data->referenced_by};
 			rerender_articles(session->ctx, &referenced_by, &path, url.data);
@@ -1987,8 +1992,6 @@ void route(session_t* session, request* req) {
 			uint64_t abc_order = path_abc_order(vector_getstr(&new_path, new_path.length-1));
 			filemap_ordered_insert(&session->ctx->articles_alphabetical, abc_order, &idx_obj);
 			
-			filemap_list_remove(&session->ctx->article_id, &article);
-
 			vector_free(&referenced_by);
 		} else {
 			url = flatten_url(&path);
