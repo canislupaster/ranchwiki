@@ -356,12 +356,11 @@ void filemap_resize(filemap_index_t* index) {
 		index->resize_slots += RESIZE_SLOTS;
 
 		for (uint64_t i = index->resize_slots - RESIZE_SLOTS; i < index->resize_slots; i++) {
-			long probes = 0;
 			uint64_t hash;
 
-			for (uint64_t i2 = 0; i2 < index->slots; i2++) {	// extra check in case non-resized slots are full and have
+			for (uint64_t probes = 0; probes < index->slots; probes++) {	// extra check in case non-resized slots are full and have
 																												// same hash
-				uint64_t slot_pos = INDEX_PREAMBLE + 8 * ((i + (uint64_t)((probes + probes * probes) / 2)) % index->slots);
+				uint64_t slot_pos = INDEX_PREAMBLE + 8 * ((i + ((probes + probes * probes) / 2)) % index->slots);
 				fseek(index->file, slot_pos, SEEK_SET);
 
 				uint64_t pos = 0;
@@ -392,7 +391,7 @@ void filemap_resize(filemap_index_t* index) {
 
 				hash = do_hash(index, field, f_size);
 
-				if (hash % (index->slots * 2) == index->slots+i) { //might not have same hash
+ 				if (hash % (index->slots * 2) == index->slots+i) { //might not have same hash
 					// seek back to pos, set to zero (since we are moving item)
 					fseek(index->file, slot_pos, SEEK_SET);
 
@@ -412,7 +411,7 @@ void filemap_resize(filemap_index_t* index) {
 						// add more lookup slots for probing
 						// these are only for already-resized slots
 						if (slot >= index->slots + index->resize_lookup_slots) {
-							uint64_t diff = slot - index->slots + index->resize_lookup_slots - 1;
+							uint64_t diff = slot - index->slots + index->resize_lookup_slots + 1;
 
 							fseek(index->file, 0, SEEK_END);
 							write_slots(index, diff);
@@ -432,8 +431,6 @@ void filemap_resize(filemap_index_t* index) {
 					fseek(index->file, new_index, SEEK_SET);
 					fwrite(&pos, 8, 1, index->file);
 				}
-
-				probes++;
 			}
 		}
 
@@ -466,9 +463,14 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 										(resizing ? index->slots * 2 : index->slots);
 
 		if ((resizing && slot >= index->slots + index->resize_lookup_slots) ||
-				(!resizing && probes >= index->slots))
+				(!resizing && probes >= index->slots)) {
+			if (insert) {
+				
+			}
+			
 			break;	// exceeded extra resize probing slots, wasn't extended during
 							// resize and so does not exist
+		}
 
 		fseek(index->file, INDEX_PREAMBLE + (slot * 8), SEEK_SET);
 
@@ -476,7 +478,7 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 		fread(&obj.data_pos, 8, 1, index->file);	// read pos from current slot
 
 		if (obj.data_pos == SENTINEL) {
-			if (insert) {
+			if 	(insert) {
 				obj.data_pos = 0;
 				return obj;
 			}
