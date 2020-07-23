@@ -411,7 +411,7 @@ void filemap_resize(filemap_index_t* index) {
 						// add more lookup slots for probing
 						// these are only for already-resized slots
 						if (slot >= index->slots + index->resize_lookup_slots) {
-							uint64_t diff = slot - index->slots + index->resize_lookup_slots + 1;
+							uint64_t diff = slot - (index->slots + index->resize_lookup_slots - 1);
 
 							fseek(index->file, 0, SEEK_END);
 							write_slots(index, diff);
@@ -464,12 +464,18 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 
 		if ((resizing && slot >= index->slots + index->resize_lookup_slots) ||
 				(!resizing && probes >= index->slots)) {
-			if (insert) {
-				
-			}
 			
-			break;	// exceeded extra resize probing slots, wasn't extended during
-							// resize and so does not exist
+			if (insert) {
+				uint64_t diff = slot - (index->slots + index->resize_lookup_slots - 1);
+
+				fseek(index->file, 0, SEEK_END);
+				write_slots(index, diff);
+
+				index->resize_lookup_slots += diff;
+			} else {
+				break;	// exceeded extra resize probing slots, wasn't extended during
+								// resize and so does not exist
+			}
 		}
 
 		fseek(index->file, INDEX_PREAMBLE + (slot * 8), SEEK_SET);
@@ -478,7 +484,7 @@ static filemap_partial_object filemap_find_unlocked(filemap_index_t* index,
 		fread(&obj.data_pos, 8, 1, index->file);	// read pos from current slot
 
 		if (obj.data_pos == SENTINEL) {
-			if 	(insert) {
+			if (insert) {
 				obj.data_pos = 0;
 				return obj;
 			}
@@ -913,7 +919,7 @@ uint64_t filemap_page_insert(filemap_ordered_list_t* list, uint64_t length, uint
 
 	uint64_t pos;
 
-	if (i==0 || i == length-1) {	// length == 0 or end of list
+	if (i == length) {	// length == 0 or end of list
 		pos = ftell(list->file);
 		fwrite((uint64_t[]){item_order, data_pos}, 8 * 2, 1, list->file);
 
