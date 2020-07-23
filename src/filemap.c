@@ -1072,8 +1072,7 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 		cont = filemap_page_next(&iter);
 
 		if (item_order >= min && (item_order <= iter.min || !cont)) {
-			cont = 1;
-			while (cont && pages.length>0) {
+			while (pages.length>0) {
 				uint64_t page = *(uint64_t*)vector_get(&pages, pages.length-1);
 				vector_pop(&pages);
 				
@@ -1105,6 +1104,8 @@ int filemap_ordered_remove_id(filemap_ordered_list_t* list, uint64_t item_order,
 					}
 				}
 			}
+			
+			break;
 		}
 
 		vector_pushcpy(&pages, &iter.page);
