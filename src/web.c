@@ -46,6 +46,10 @@ session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen
 	session->user_ses = NULL;
 	session->auth_tok = NULL;
 
+	char name[100];
+	if (getnameinfo(addr, addrlen, name, 100, NULL, 0, NI_NUMERICHOST)==0)
+		printf("%s\n", name);
+
   return session;
 }
 
