@@ -48,7 +48,7 @@ session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen
 
 	char name[100];
 	if (getnameinfo(addr, addrlen, name, 100, NULL, 0, NI_NUMERICHOST)==0)
-		printf("%s\n", name);
+		printf("\nIP %s\n\n", name);
 
   return session;
 }
