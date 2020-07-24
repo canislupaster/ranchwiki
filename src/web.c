@@ -30,18 +30,18 @@
 
 session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen) {
 
-  session_t *session = heap(sizeof(session_t));
+	session_t *session = heap(sizeof(session_t));
 
-  session->ctx = ctx;
+	session->ctx = ctx;
 
-  session->closed = 0;
+	session->closed = 0;
 
-  session->parser.done = 1;
-  session->requests = vector_new(sizeof(request));
+	session->parser.done = 1;
+	session->requests = vector_new(sizeof(request));
 
-  session->bev = bufferevent_socket_new(
-        ctx->evbase, fd, BEV_OPT_CLOSE_ON_FREE);
-  bufferevent_enable(session->bev, EV_READ | EV_WRITE);
+	session->bev = bufferevent_socket_new(
+				ctx->evbase, fd, BEV_OPT_CLOSE_ON_FREE);
+	bufferevent_enable(session->bev, EV_READ | EV_WRITE);
 
 	session->user_ses = NULL;
 	session->auth_tok = NULL;
@@ -50,118 +50,118 @@ session_t *create_session(ctx_t *ctx, int fd, struct sockaddr *addr, int addrlen
 	if (getnameinfo(addr, addrlen, name, 100, NULL, 0, NI_NUMERICHOST)==0)
 		printf("\nIP %s\n\n", name);
 
-  return session;
+	return session;
 }
 
 void query_free(vector_t* query) {
-  vector_iterator query_iter = vector_iterate(query);
-  while (vector_next(&query_iter)) {
-    char** q = query_iter.x;
-    drop(q[0]);
-    drop(q[1]);
-  }
+	vector_iterator query_iter = vector_iterate(query);
+	while (vector_next(&query_iter)) {
+		char** q = query_iter.x;
+		drop(q[0]);
+		drop(q[1]);
+	}
 
 	vector_free(query);
 }
 
 void req_free(request* req) {
-  if (req->content) {
-    drop(req->content);
-  }
+	if (req->content) {
+		drop(req->content);
+	}
 
 	query_free(&req->query);
 	query_free(&req->cookies);
 
-  vector_iterator mdata_iter = vector_iterate(&req->files);
-  while (vector_next(&mdata_iter)) {
-    multipart_data* d = mdata_iter.x;
-    drop(d->name);
-    drop(d->mime);
-    drop(d->content);
-  }
+	vector_iterator mdata_iter = vector_iterate(&req->files);
+	while (vector_next(&mdata_iter)) {
+		multipart_data* d = mdata_iter.x;
+		drop(d->name);
+		drop(d->mime);
+		drop(d->content);
+	}
 
 	vector_free_strings(&req->path);
 
-  map_iterator header_iter = map_iterate(&req->headers);
-  while (map_next(&header_iter)) {
-    drop(*(char**)header_iter.key);
-    drop(*(char**)header_iter.x);
-  }
+	map_iterator header_iter = map_iterate(&req->headers);
+	while (map_next(&header_iter)) {
+		drop(*(char**)header_iter.key);
+		drop(*(char**)header_iter.x);
+	}
 
-  vector_free(&req->files);
+	vector_free(&req->files);
 	map_free(&req->headers);
 }
 
 void terminate(session_t *session) {
-  vector_iterator req_iter = vector_iterate(&session->requests);
-  while (vector_next(&req_iter)) {
-    req_free(req_iter.x);
-  }
+	vector_iterator req_iter = vector_iterate(&session->requests);
+	while (vector_next(&req_iter)) {
+		req_free(req_iter.x);
+	}
 
-  if (!session->parser.done)
-    if (session->parser.multipart_boundary)
-      drop(session->parser.multipart_boundary);
+	if (!session->parser.done)
+		if (session->parser.multipart_boundary)
+			drop(session->parser.multipart_boundary);
 
-  if (!session->parser.done && session->parser.req_parsed) {
-    req_free(&session->parser.req);
-  }
+	if (!session->parser.done && session->parser.req_parsed) {
+		req_free(&session->parser.req);
+	}
 
-  bufferevent_disable(session->bev, EV_READ);
+	bufferevent_disable(session->bev, EV_READ);
 	
 	if (session->auth_tok) drop(session->auth_tok);
-  session->closed = 1;
+	session->closed = 1;
 }
 
 void skip(char** cur) {
-  if (**cur) (*cur)++;
+	if (**cur) (*cur)++;
 }
 
 void parse_ws(char** cur) {
-  while (**cur == ' ') (*cur)++;
+	while (**cur == ' ') (*cur)++;
 }
 
 void skip_until(char** cur, char* delim) {
-  while (!strchr(delim, **cur) && **cur) (*cur)++;
+	while (!strchr(delim, **cur) && **cur) (*cur)++;
 }
 
 void skip_while(char** cur, char* delim) {
-  while (strchr(delim, **cur) && **cur) (*cur)++;
+	while (strchr(delim, **cur) && **cur) (*cur)++;
 }
 
 int skip_newline(char** cur) {
-  if (**cur == '\r') skip(cur);
-  if (**cur == '\n') {
-    skip(cur);
-    return 1;
-  } else {
-    return 0;
-  }
+	if (**cur == '\r') skip(cur);
+	if (**cur == '\n') {
+		skip(cur);
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 char* parse_name(char** cur, char* delim) {
-  char* start = *cur;
-  while (!strchr(delim, **cur) && **cur) (*cur)++;
+	char* start = *cur;
+	while (!strchr(delim, **cur) && **cur) (*cur)++;
 
-  char *str = heap(*cur - start + 1);
-  memcpy(str, start, *cur - start);
-  str[*cur - start] = 0;
+	char *str = heap(*cur - start + 1);
+	memcpy(str, start, *cur - start);
+	str[*cur - start] = 0;
 
-  return str;
+	return str;
 }
 
 int skip_word(char** cur, const char* word) {
-  if (strncmp(*cur, word, strlen(word))==0) {
-    (*cur) += strlen(word);
-    return 1;
-  } else {
-    return 0;
-  }
+	if (strncmp(*cur, word, strlen(word))==0) {
+		(*cur) += strlen(word);
+		return 1;
+	} else {
+		return 0;
+	}
 }
 
 //kinda copied from https://nachtimwald.com/2017/09/24/hex-encode-and-decode-in-c/
 //since im too lazy to type all these ifs
 char hexchar(char hex) {
-  if (hex >= '0' && hex <= '9') {
+	if (hex >= '0' && hex <= '9') {
 		return hex - '0';
 	} else if (hex >= 'A' && hex <= 'F') {
 		return hex - 'A' + 10;
@@ -185,38 +185,38 @@ void charhex(unsigned char chr, char* out) {
 
 //frees original string
 char* percent_decode(char* data, unsigned long* sz) {
-  char buffer[strlen(data)+1]; //temporary buffer, at most as long as data
-  memset(buffer, 0, strlen(data)+1);
+	char buffer[strlen(data)+1]; //temporary buffer, at most as long as data
+	memset(buffer, 0, strlen(data)+1);
 
-  unsigned long cur=0; //write cursor
+	unsigned long cur=0; //write cursor
 
-  char* curdata = data; //copy data ptr
-  
-  while (*curdata) {
-    if (*curdata == '+') {
-      buffer[cur] = ' '; cur++;
-    } else if (*curdata == '%') {
-      skip(&curdata);
-      char x = hexchar(*curdata) * 16;
-      skip(&curdata);
-      x += hexchar(*curdata);
+	char* curdata = data; //copy data ptr
+	
+	while (*curdata) {
+		if (*curdata == '+') {
+			buffer[cur] = ' '; cur++;
+		} else if (*curdata == '%') {
+			skip(&curdata);
+			char x = hexchar(*curdata) * 16;
+			skip(&curdata);
+			x += hexchar(*curdata);
 
-      buffer[cur] = x; cur++;
-    } else {
-      buffer[cur] = *curdata; cur++;
-    }
+			buffer[cur] = x; cur++;
+		} else {
+			buffer[cur] = *curdata; cur++;
+		}
 
-    curdata++;
-  }
+		curdata++;
+	}
 
 	if (sz) *sz = cur;
 
-  return heapcpy(sz ? *sz : strlen(buffer)+1, buffer); //truncate and copy buffer
+	return heapcpy(sz ? *sz : strlen(buffer)+1, buffer); //truncate and copy buffer
 }
 
 char* percent_encode(char* data, unsigned long sz) {
 	char buffer[sz*3];
-  memset(buffer, 0, sz*3);
+	memset(buffer, 0, sz*3);
 
 	char* cursor = buffer;
 
@@ -241,31 +241,31 @@ char* percent_encode(char* data, unsigned long sz) {
 }
 
 void respond(session_t* session, int stat, char* content, unsigned long len, char* (*headers)[2], int headers_len) {
-  struct evbuffer* evbuf = bufferevent_get_output(session->bev);
-  evbuffer_add_printf(evbuf, "HTTP/1.1 %i %s\r\n", stat, reason(stat));
+	struct evbuffer* evbuf = bufferevent_get_output(session->bev);
+	evbuffer_add_printf(evbuf, "HTTP/1.1 %i %s\r\n", stat, reason(stat));
 
-  if (content) {
-    evbuffer_add_printf(evbuf, "Content-Length: %lu\r\n", len);
-  }
+	if (content) {
+		evbuffer_add_printf(evbuf, "Content-Length: %lu\r\n", len);
+	}
 
 	if (session->auth_tok) {
 		char* encoded = percent_encode(session->auth_tok, AUTH_KEYSZ);
-    evbuffer_add_printf(evbuf, "Set-Cookie: ranchsession=\"%s\"\r\n", encoded);
+		evbuffer_add_printf(evbuf, "Set-Cookie: ranchsession=\"%s\"\r\n", encoded);
 		drop(encoded);
 		
 		drop(session->auth_tok);
 		session->auth_tok = NULL;
 	}
 
-  for (int i=0; i<headers_len; i++) {
-    evbuffer_add_printf(evbuf, "%s:%s\r\n", headers[i][0], headers[i][1]);
-  }
+	for (int i=0; i<headers_len; i++) {
+		evbuffer_add_printf(evbuf, "%s:%s\r\n", headers[i][0], headers[i][1]);
+	}
 
-  evbuffer_add_printf(evbuf, "\r\n");
+	evbuffer_add_printf(evbuf, "\r\n");
 
-  if (content) {
-    evbuffer_add(evbuf, content, len);
-  }
+	if (content) {
+		evbuffer_add(evbuf, content, len);
+	}
 }
 
 void respond_redirect(session_t* session, char* url) {
@@ -273,7 +273,7 @@ void respond_redirect(session_t* session, char* url) {
 }
 
 void respond_html(session_t* session, int stat, char* content) {
-  respond(session, stat, content, strlen(content), &(char*[2]){"Content-Type", "text/html; charset=UTF-8"}, 1);
+	respond(session, stat, content, strlen(content), &(char*[2]){"Content-Type", "text/html; charset=UTF-8"}, 1);
 }
 
 void escape_html(char** str) {
@@ -306,7 +306,7 @@ typedef struct {
 	unsigned long skip; //if a condition, length, including !%
 	unsigned long max_args; //required arguments
 	unsigned long max_cond;
-  unsigned long max_loop;
+	unsigned long max_loop;
 	vector_t substitutions;
 } template_t;
 
@@ -316,14 +316,14 @@ typedef struct {
 
 	template_t* insertion;
 	char inverted; //inverted condition
-  char loop;
-  char noescape;
+	char loop;
+	char noescape;
 } substitution_t;
 
 typedef struct {
-  int* cond_args;
-  vector_t** loop_args;
-  char** sub_args;
+	int* cond_args;
+	vector_t** loop_args;
+	char** sub_args;
 } template_args;
 
 template_t template_new(char* data) {
@@ -368,22 +368,22 @@ template_t template_new(char* data) {
 				substitution_t* cond = vector_push(&template.substitutions);
 				cond->offset = write_cursor-template.str;
 				
-        cond->inverted = 0;
-        cond->loop = 0;
+				cond->inverted = 0;
+				cond->loop = 0;
 
 				if (*read_cursor == '*') {
-          cond->loop = 1;
-          read_cursor++;
-        } else if (*read_cursor == '!') {
+					cond->loop = 1;
+					read_cursor++;
+				} else if (*read_cursor == '!') {
 					cond->inverted = 1;
 					read_cursor++;
 				}
 
 				cond->idx = *read_cursor - '0';
 				if (cond->loop && cond->idx >= template.max_loop)
-          template.max_loop = cond->idx+1;
+					template.max_loop = cond->idx+1;
 				else if (cond->idx >= template.max_cond)
-          template.max_cond = cond->idx+1;
+					template.max_cond = cond->idx+1;
 
 				char* cond_start = ++read_cursor;
 				template_t insertion = template_new(cond_start);
@@ -404,14 +404,14 @@ template_t template_new(char* data) {
 				
 			//index subsitution
 			} else {
-        substitution_t sub = {.offset=write_cursor-template.str};
+				substitution_t sub = {.offset=write_cursor-template.str};
 
-        if (*read_cursor == '#') {
-          sub.noescape = 1;
-          read_cursor++;
-        } else {
-          sub.noescape = 0;
-        }
+				if (*read_cursor == '#') {
+					sub.noescape = 1;
+					read_cursor++;
+				} else {
+					sub.noescape = 0;
+				}
 
 				sub.idx = *read_cursor - '0';
 				if (sub.idx >= template.max_args) template.max_args = sub.idx+1;
@@ -439,23 +439,23 @@ void template_length(template_t* template, unsigned long* len, template_args* ar
 	while (vector_next(&iter)) {
 		substitution_t* sub = iter.x;
 		if (sub->insertion) {
-      if (sub->loop) {
-        vector_iterator iter = vector_iterate(args->loop_args[sub->idx]);
-        while (vector_next(&iter))
-          template_length(sub->insertion, len, iter.x);
+			if (sub->loop) {
+				vector_iterator iter = vector_iterate(args->loop_args[sub->idx]);
+				while (vector_next(&iter))
+					template_length(sub->insertion, len, iter.x);
 
-        continue;
-      }
+				continue;
+			}
 
 			if (sub->inverted ^ !args->cond_args[sub->idx]) continue;
 			template_length(sub->insertion, len, args);
 		} else {
 			char* arg = args->sub_args[sub->idx];
 
-      if (sub->noescape) {
-        *len += strlen(arg);
-        continue;
-      }
+			if (sub->noescape) {
+				*len += strlen(arg);
+				continue;
+			}
 
 			while (*arg) {
 				switch (*arg) {
@@ -488,35 +488,35 @@ void template_substitute(template_t* template, char** out, template_args* args) 
 		}
 
 		if (sub->insertion) {
-      if (sub->loop) {
-        vector_iterator iter = vector_iterate(args->loop_args[sub->idx]);
-        while (vector_next(&iter)) {
-          template_args* args = iter.x;
-          template_substitute(sub->insertion, out, args);
-          
-          //convenience free
-          if (args->sub_args)
-            drop(args->sub_args);
-          if (args->cond_args)
-            drop(args->cond_args);
-          if (args->loop_args)
-            drop(args->loop_args);
-         }
+			if (sub->loop) {
+				vector_iterator iter = vector_iterate(args->loop_args[sub->idx]);
+				while (vector_next(&iter)) {
+					template_args* args = iter.x;
+					template_substitute(sub->insertion, out, args);
+					
+					//convenience free
+					if (args->sub_args)
+						drop(args->sub_args);
+					if (args->cond_args)
+						drop(args->cond_args);
+					if (args->loop_args)
+						drop(args->loop_args);
+				 }
 
-         vector_free(args->loop_args[sub->idx]);
+				 vector_free(args->loop_args[sub->idx]);
 
-        continue;
-      }
+				continue;
+			}
 
 			if (sub->inverted ^ !args->cond_args[sub->idx]) continue;
 			template_substitute(sub->insertion, out, args);
 		} else {
 			char* arg = args->sub_args[sub->idx];
 
-      if (sub->noescape) {
-        while (*arg) *((*out)++) = *(arg++);
+			if (sub->noescape) {
+				while (*arg) *((*out)++) = *(arg++);
 				continue;
-      }
+			}
 
 			while (*arg) {
 				char* escaped;
@@ -534,8 +534,8 @@ void template_substitute(template_t* template, char** out, template_args* args) 
 					memcpy(*out, escaped, strlen(escaped));
 					*out += strlen(escaped);
 				} else {
-          **out = *arg;
-          (*out)++;
+					**out = *arg;
+					(*out)++;
 				}
 
 				arg++;
@@ -549,7 +549,7 @@ void template_substitute(template_t* template, char** out, template_args* args) 
 }
 
 char* do_template(template_t* template, va_list args) {
-  //allocate arrays on stack, then reference
+	//allocate arrays on stack, then reference
 	int cond_args[template->max_cond];
 	for (unsigned long i=0; i<template->max_cond; i++) {
 		cond_args[i] = va_arg(args, int);
@@ -565,7 +565,7 @@ char* do_template(template_t* template, va_list args) {
 		sub_args[i] = va_arg(args, char*);
 	}
 
-  template_args t_args = {.cond_args=cond_args, .loop_args=loop_args, .sub_args=sub_args};
+	template_args t_args = {.cond_args=cond_args, .loop_args=loop_args, .sub_args=sub_args};
 
 	unsigned long len = 0;
 	template_length(template, &len, &t_args);
@@ -594,143 +594,143 @@ void respond_template(session_t* session, int stat, char* template_name, char* t
 
 	char* global_output = heapstr(session->ctx->global, escaped_title, template_output);
 
-  respond_html(session, stat, global_output);
+	respond_html(session, stat, global_output);
 
 	drop(escaped_title);
-  drop(template_output);
-  drop(global_output);
+	drop(template_output);
+	drop(global_output);
 }
 
 void respond_error(session_t* session, int stat, char* err) {
-  respond_template(session, stat, ERROR_TEMPLATE, err, err);
+	respond_template(session, stat, ERROR_TEMPLATE, err, err);
 }
 
 // vector_t parse_list(char* data, char* delim) {
-//   vector_t list = vector_new(sizeof(char*));
+//	 vector_t list = vector_new(sizeof(char*));
 
-//   while (*data) {
-//     parse_name(&data, delim);
-//     data++; //skip delim
-//   }
-  
+//	 while (*data) {
+//		 parse_name(&data, delim);
+//		 data++; //skip delim
+//	 }
+	
 // }
 
 void parse_querystring(char* line, vector_t* vec) {
-  while (*line) {
+	while (*line) {
 		char* key_hex = parse_name(&line, "=");
-    char* key = percent_decode(key_hex, NULL);
+		char* key = percent_decode(key_hex, NULL);
 		drop(key_hex);
 		
-    skip(&line);
+		skip(&line);
 		
 		char* val_hex = parse_name(&line, "& ");
-    char* val = percent_decode(val_hex, NULL);
+		char* val = percent_decode(val_hex, NULL);
 		drop(val_hex);
-    
-    vector_pushcpy(vec, &(char*[2]){key, val});
+		
+		vector_pushcpy(vec, &(char*[2]){key, val});
 
-    if (*line == ' ') break;
-    skip(&line); //skip &
-  }
+		if (*line == ' ') break;
+		skip(&line); //skip &
+	}
 }
 
 vector_t query_find(vector_t *vec, char **params, int num_params, int strict) {
-  vector_t res = vector_new(sizeof(char*));
+	vector_t res = vector_new(sizeof(char*));
 
-  if ((strict && vec->length != num_params) || vec->length > num_params)
-    return res;
+	if ((strict && vec->length != num_params) || vec->length > num_params)
+		return res;
 
-  vector_iterator iter = vector_iterate(vec);
-  while (vector_next(&iter)) {
-    char **q = iter.x;
+	vector_iterator iter = vector_iterate(vec);
+	while (vector_next(&iter)) {
+		char **q = iter.x;
 
-    for (int i = 0; i < num_params; i++) {
-      if (strcmp(q[0], params[i]) == 0) {
-        vector_setcpy(&res, i, &q[1]);
-      }
-    }
-  }
+		for (int i = 0; i < num_params; i++) {
+			if (strcmp(q[0], params[i]) == 0) {
+				vector_setcpy(&res, i, &q[1]);
+			}
+		}
+	}
 
-  return res;
+	return res;
 }
 
 //not sure i can make this generic without offsets
 vector_t multipart_find(vector_t *vec, char **params, int num_params, int strict) {
 	vector_t res = vector_new(sizeof(multipart_data));
 	
-  if ((strict && vec->length != num_params) || vec->length > num_params)
-    return res;
+	if ((strict && vec->length != num_params) || vec->length > num_params)
+		return res;
 
-  vector_iterator iter = vector_iterate(vec);
-  while (vector_next(&iter)) {
-    multipart_data* q = iter.x;
+	vector_iterator iter = vector_iterate(vec);
+	while (vector_next(&iter)) {
+		multipart_data* q = iter.x;
 
-    for (int i = 0; i < num_params; i++) {
-      if (strcmp(q->name, params[i]) == 0) {
-        vector_setcpy(&res, i, q);
-      }
-    }
-  }
+		for (int i = 0; i < num_params; i++) {
+			if (strcmp(q->name, params[i]) == 0) {
+				vector_setcpy(&res, i, q);
+			}
+		}
+	}
 
-  return res;
+	return res;
 }
 
 int request_parse(char* line, request* req) {
-  parse_ws(&line);
+	parse_ws(&line);
 
-  if (skip_word(&line, "GET")) {
-    req->method = GET;
-  } else if (skip_word(&line, "POST")) {
-    req->method = POST;
-  } else {
-    return 0;
-  }
+	if (skip_word(&line, "GET")) {
+		req->method = GET;
+	} else if (skip_word(&line, "POST")) {
+		req->method = POST;
+	} else {
+		return 0;
+	}
 
-  parse_ws(&line);
-  
-  req->path = vector_new(sizeof(char*));
-  req->query = vector_new(sizeof(char*[2]));
+	parse_ws(&line);
+	
+	req->path = vector_new(sizeof(char*));
+	req->query = vector_new(sizeof(char*[2]));
 	req->cookies = vector_new(sizeof(char*[2]));
-  req->files = vector_new(sizeof(multipart_data));
-  
-  req->content = NULL;
-  req->content_length = 0;
+	req->files = vector_new(sizeof(multipart_data));
+	
+	req->content = NULL;
+	req->content_length = 0;
 
-  if (*line == '*') {
-    line++;
-  } else {
-    if (*line == '/') line++;
+	if (*line == '*') {
+		line++;
+	} else {
+		if (*line == '/') line++;
 
-    while (*line != ' ') {
-      if (strncmp(line, "../", strlen("../"))==0) {
-        char* top = vector_popptr(&req->path);
-        if (!top) {
+		while (*line != ' ') {
+			if (strncmp(line, "../", strlen("../"))==0) {
+				char* top = vector_popptr(&req->path);
+				if (!top) {
 
-          vector_free_strings(&req->path);
-          vector_free(&req->query);
+					vector_free_strings(&req->path);
+					vector_free(&req->query);
 
-          return 0;
-        } else {
-          drop(top);
-        }
-      } else {
-        char* segment = parse_name(&line, " /?");
-        vector_pushcpy(&req->path, &segment);
+					return 0;
+				} else {
+					drop(top);
+				}
+			} else {
+				char* segment = parse_name(&line, " /?");
+				vector_pushcpy(&req->path, &segment);
 
-        if (*line == '/') line++;
-        if (*line == '?') {
-          skip(&line); //skip ?
-          parse_querystring(line, &req->query);
-          break;
-        }
-      }
-    }
-  }
+				if (*line == '/') line++;
+				if (*line == '?') {
+					skip(&line); //skip ?
+					parse_querystring(line, &req->query);
+					break;
+				}
+			}
+		}
+	}
 
-  req->headers = map_new();
-  map_configure_string_key(&req->headers, sizeof(char*));
+	req->headers = map_new();
+	map_configure_string_key(&req->headers, sizeof(char*));
 
-  return 1;
+	return 1;
 }
 
 vector_t parse_header_value(char* val) {
@@ -792,17 +792,17 @@ char* query_extract_value(vector_t* val, char* key) {
 }
 
 int parse_content(session_t* session, struct evbuffer* evbuf) {
-  if (evbuffer_get_length(evbuf) >= session->parser.req.content_length) {
-    if (evbuffer_remove(evbuf, session->parser.req.content, session->parser.req.content_length)==-1) {
-      respond_error(session, 500, "Buffer error");
-      terminate(session);
-      return 0;
-    }
-    
-    //handle supported formats
-    if (session->parser.req.ctype == url_formdata) {
-      parse_querystring(session->parser.req.content, &session->parser.req.query);
-    } else if (session->parser.req.ctype == multipart_formdata) {
+	if (evbuffer_get_length(evbuf) >= session->parser.req.content_length) {
+		if (evbuffer_remove(evbuf, session->parser.req.content, session->parser.req.content_length)==-1) {
+			respond_error(session, 500, "Buffer error");
+			terminate(session);
+			return 0;
+		}
+		
+		//handle supported formats
+		if (session->parser.req.ctype == url_formdata) {
+			parse_querystring(session->parser.req.content, &session->parser.req.query);
+		} else if (session->parser.req.ctype == multipart_formdata) {
 			char* content = session->parser.req.content;
 
 			while (!skip_word(&content, session->parser.multipart_boundary) && *content) content++;
@@ -815,14 +815,14 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
 					if (skip_word(&content, "Content-Type:")) {
 						parse_ws(&content);
 						if (!mime) mime = parse_name(&content, "\r\n");
-            skip_newline(&content);
+						skip_newline(&content);
 					} else if (skip_word(&content, "Content-Disposition:")) {
 						parse_ws(&content);
 						if (!disposition) disposition = parse_name(&content, "\r\n");
-            skip_newline(&content);
+						skip_newline(&content);
 					} else {
 						skip_until(&content, "\r\n");
-            skip_newline(&content);
+						skip_newline(&content);
 					}
 				}
 
@@ -865,61 +865,61 @@ int parse_content(session_t* session, struct evbuffer* evbuf) {
 				}
 			}
 
-      drop(session->parser.multipart_boundary);
+			drop(session->parser.multipart_boundary);
 		}
 
-    vector_pushcpy(&session->requests, &session->parser.req);
-    session->parser.done = 1;
+		vector_pushcpy(&session->requests, &session->parser.req);
+		session->parser.done = 1;
 
-    return 1;
-  } else {
-    return 0; //wait for more to arrive
-  }
+		return 1;
+	} else {
+		return 0; //wait for more to arrive
+	}
 }
 
 
 void route(session_t* session, request* req);
 
 /* readcb for bufferevent after client connection header was
-   checked. */
+	 checked. */
 void readcb(struct bufferevent *bev, void* ctx) {
-  session_t *session = (session_t *)ctx;
+	session_t *session = (session_t *)ctx;
 
-  struct evbuffer* evbuf = bufferevent_get_input(bev);
-  
-  char* line;
+	struct evbuffer* evbuf = bufferevent_get_input(bev);
+	
+	char* line;
 
-  //parse content
-  if (!session->parser.done && session->parser.content_parsing) {
-    if (!parse_content(session, evbuf)) return;
-  }
+	//parse content
+	if (!session->parser.done && session->parser.content_parsing) {
+		if (!parse_content(session, evbuf)) return;
+	}
 
-  //parse request lines
-  while ((line = evbuffer_readln(evbuf, NULL, EVBUFFER_EOL_CRLF))) {
-    printf("%s\n", line); //log req
+	//parse request lines
+	while ((line = evbuffer_readln(evbuf, NULL, EVBUFFER_EOL_CRLF))) {
+		printf("%s\n", line); //log req
 
-    //parse new request or finish old one
-    if (session->parser.done) {
-      session->parser.done = 0;
-      session->parser.req_parsed = 0;
-      session->parser.has_content = 0;
-      session->parser.content_parsing = 0;
+		//parse new request or finish old one
+		if (session->parser.done) {
+			session->parser.done = 0;
+			session->parser.req_parsed = 0;
+			session->parser.has_content = 0;
+			session->parser.content_parsing = 0;
 			session->parser.multipart_boundary = NULL;
-    }
-    
-    if (strlen(line) == 0 && session->parser.req_parsed) {
-      if (!session->parser.has_content) {
-        vector_pushcpy(&session->requests, &session->parser.req);
-        session->parser.done = 1;
-      } else {
-        const char* clength_name = "Content-Type";
-        char** ctype = map_find(&session->parser.req.headers, &clength_name);
+		}
+		
+		if (strlen(line) == 0 && session->parser.req_parsed) {
+			if (!session->parser.has_content) {
+				vector_pushcpy(&session->requests, &session->parser.req);
+				session->parser.done = 1;
+			} else {
+				const char* clength_name = "Content-Type";
+				char** ctype = map_find(&session->parser.req.headers, &clength_name);
 
 				const char* multipart_name = "multipart/form-data";
 
-        //handle supported formats
-        if (ctype && strcmp(*ctype, "application/x-www-form-urlencoded")==0) {
-          session->parser.req.ctype = url_formdata;
+				//handle supported formats
+				if (ctype && strcmp(*ctype, "application/x-www-form-urlencoded")==0) {
+					session->parser.req.ctype = url_formdata;
 				} else if (ctype && strncmp(*ctype, multipart_name, strlen(multipart_name))==0) {
 					session->parser.req.ctype = multipart_formdata;
 
@@ -927,45 +927,45 @@ void readcb(struct bufferevent *bev, void* ctx) {
 					session->parser.multipart_boundary = query_extract_value(&ctype_val, "boundary");
 
 					char* prefixed = heapstr("--%s", session->parser.multipart_boundary);
-          drop(session->parser.multipart_boundary);
-          session->parser.multipart_boundary = prefixed;
+					drop(session->parser.multipart_boundary);
+					session->parser.multipart_boundary = prefixed;
 
 					if (!session->parser.multipart_boundary) {
 						respond_error(session, 400, "no boundary provided with multipart request");
 						terminate(session);
 						return;
 					}
-        } else {
-          respond_error(session, 400, "unsupported body format");
-          terminate(session);
-          return;
-        }
+				} else {
+					respond_error(session, 400, "unsupported body format");
+					terminate(session);
+					return;
+				}
 
 				session->parser.req.content = heap(session->parser.req.content_length + 1);
 				session->parser.req.content[session->parser.req.content_length] = 0;
 
-        session->parser.content_parsing = 1;
-        
+				session->parser.content_parsing = 1;
+				
 				if (!parse_content(session, evbuf)) return;
-      }
-    
-    //parse request
-    } else if (!session->parser.req_parsed) {
-      if (request_parse(line, &session->parser.req)) {
-        session->parser.req_parsed = 1;
-      } else {
-        respond_error(session, 400, "Malformed request");
+			}
+		
+		//parse request
+		} else if (!session->parser.req_parsed) {
+			if (request_parse(line, &session->parser.req)) {
+				session->parser.req_parsed = 1;
+			} else {
+				respond_error(session, 400, "Malformed request");
 				terminate(session);
 				return;
 			}
-    } else {
-      char* cur = line; //copy line to use as cursor
-      if (skip_word(&cur, "Content-Length:")) {
-        session->parser.req.content_length = strtoul(cur, &cur, 10);
-        session->parser.has_content = 1;
+		} else {
+			char* cur = line; //copy line to use as cursor
+			if (skip_word(&cur, "Content-Length:")) {
+				session->parser.req.content_length = strtoul(cur, &cur, 10);
+				session->parser.has_content = 1;
 
-        if (session->parser.req.content_length > CONTENT_MAX) {
-          respond_error(session, 400, "Oversized content");
+				if (session->parser.req.content_length > CONTENT_MAX) {
+					respond_error(session, 400, "Oversized content");
 					terminate(session);
 					return;
 				}
@@ -973,28 +973,28 @@ void readcb(struct bufferevent *bev, void* ctx) {
 				parse_ws(&cur);
 				query_free(&session->parser.req.cookies);
 				session->parser.req.cookies = parse_header_value(cur);
-      } else {
-        char* name = parse_name(&cur, ":");
-        skip(&cur);
-        parse_ws(&cur);
-        char* val = parse_name(&cur, "");
+			} else {
+				char* name = parse_name(&cur, ":");
+				skip(&cur);
+				parse_ws(&cur);
+				char* val = parse_name(&cur, "");
 
-        map_insert_result res = map_insert(&session->parser.req.headers, &name);
+				map_insert_result res = map_insert(&session->parser.req.headers, &name);
 				if (res.exists) {
 					drop(name);
 					drop(*(char**)res.val);
 				}
 
 				*(char**)res.val = val;
-      }
-    }
+			}
+		}
 
-    drop(line);
-  }
+		drop(line);
+	}
 
-  //respond to pending requests
-  vector_iterator req_iter = vector_iterate(&session->requests);
-  while (vector_next(&req_iter)) {
+	//respond to pending requests
+	vector_iterator req_iter = vector_iterate(&session->requests);
+	while (vector_next(&req_iter)) {
 		request* req = req_iter.x;
 
 		//initialize/find user session
@@ -1019,7 +1019,7 @@ void readcb(struct bufferevent *bev, void* ctx) {
 
 		vector_free(&auth);
 
-    route(session, req);
+		route(session, req);
 
 		//store last access for session expiry
 		if (session->user_ses) {
@@ -1028,29 +1028,29 @@ void readcb(struct bufferevent *bev, void* ctx) {
 			session->user_ses = NULL;
 		}
 
-    req_free(req_iter.x);
-  }
+		req_free(req_iter.x);
+	}
 
-  vector_clear(&session->requests);
+	vector_clear(&session->requests);
 }
 
 void listen_error(struct evconnlistener* listener, void* ctx) {
-  struct event_base *base = evconnlistener_get_base(listener);
+	struct event_base *base = evconnlistener_get_base(listener);
 
-  int err = EVUTIL_SOCKET_ERROR();
-  event_base_loopexit(base, NULL);
+	int err = EVUTIL_SOCKET_ERROR();
+	event_base_loopexit(base, NULL);
 
-  fprintf(stderr, "listener error %i %s\n", err, evutil_socket_error_to_string(err));
+	fprintf(stderr, "listener error %i %s\n", err, evutil_socket_error_to_string(err));
 }
 
 void eventcb(struct bufferevent *bev, short events, void* ctx) {
-  session_t *session = (session_t *)ctx;
-  
-  if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT)) {
+	session_t *session = (session_t *)ctx;
+	
+	if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR | BEV_EVENT_TIMEOUT)) {
 		if (session->user_ses) mtx_lock(&session->user_ses->lock);
 		
-    bufferevent_free(session->bev);
-    if (!session->closed) terminate(session);
+		bufferevent_free(session->bev);
+		if (!session->closed) terminate(session);
 		if (session->user_ses) mtx_unlock(&session->user_ses->lock);
 
 		drop(session);
@@ -1058,50 +1058,50 @@ void eventcb(struct bufferevent *bev, short events, void* ctx) {
 }
 
 void acceptcb(struct evconnlistener *listener, int fd, struct sockaddr *addr,
-              int addrlen, void *arg) {
+							int addrlen, void *arg) {
 
-  ctx_t *ctx = (ctx_t *)arg;
-  session_t *session;
+	ctx_t *ctx = (ctx_t *)arg;
+	session_t *session;
 
-  session = create_session(ctx, fd, addr, addrlen);
+	session = create_session(ctx, fd, addr, addrlen);
 
-  struct timeval tout = {.tv_sec=TIMEOUT, .tv_usec=0};
-  bufferevent_set_timeouts(session->bev, &tout, NULL);
-  bufferevent_setcb(session->bev, readcb, NULL, eventcb, session);
+	struct timeval tout = {.tv_sec=TIMEOUT, .tv_usec=0};
+	bufferevent_set_timeouts(session->bev, &tout, NULL);
+	bufferevent_setcb(session->bev, readcb, NULL, eventcb, session);
 }
 
 void start_listen(ctx_t* ctx, const char *port) {
-  struct addrinfo hints;
+	struct addrinfo hints;
 
-  memset(&hints, 0, sizeof(hints));
+	memset(&hints, 0, sizeof(hints));
 
-  hints.ai_family = AF_INET;
+	hints.ai_family = AF_INET;
 	hints.ai_protocol = IPPROTO_TCP;
-  hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG;
+	hints.ai_socktype = SOCK_STREAM;
+	hints.ai_flags = AI_PASSIVE | AI_NUMERICSERV | AI_ADDRCONFIG;
 
-  struct addrinfo *res;
-  int rv = getaddrinfo(NULL, port, &hints, &res);
-  
-  if (rv != 0) {
-    errx(1, "could not resolve server address");
-  }
+	struct addrinfo *res;
+	int rv = getaddrinfo(NULL, port, &hints, &res);
+	
+	if (rv != 0) {
+		errx(1, "could not resolve server address");
+	}
 
-  //search for viable address
-  for (struct addrinfo* cur = res; cur; cur = cur->ai_next) {
-    struct evconnlistener *listener;
-    
-    listener = evconnlistener_new_bind(
-        ctx->evbase, acceptcb, ctx, LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 16,
-        cur->ai_addr, (int)cur->ai_addrlen);
+	//search for viable address
+	for (struct addrinfo* cur = res; cur; cur = cur->ai_next) {
+		struct evconnlistener *listener;
+		
+		listener = evconnlistener_new_bind(
+				ctx->evbase, acceptcb, ctx, LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, 16,
+				cur->ai_addr, (int)cur->ai_addrlen);
 
-    if (listener) {
-      evconnlistener_set_error_cb(listener, listen_error);
-      freeaddrinfo(res);
+		if (listener) {
+			evconnlistener_set_error_cb(listener, listen_error);
+			freeaddrinfo(res);
 
-      return;
-    }
-  }
+			return;
+		}
+	}
 
-  errx(1, "could not start listener %i", errno);
+	errx(1, "could not start listener %i", errno);
 }

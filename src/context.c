@@ -43,48 +43,48 @@ typedef struct {
 } multipart_data;
 
 typedef struct {
-  method_t method;
+	method_t method;
 
-  vector_t path; //vector of char* segments
-  vector_t query; //vector of char* [2], if content type is url formdata
+	vector_t path; //vector of char* segments
+	vector_t query; //vector of char* [2], if content type is url formdata
 	vector_t cookies; //parsed cookie header
 	vector_t files; //vector of multipart_file, if content type is multipart formdata
 
-  map_t headers; //char* -> char*
+	map_t headers; //char* -> char*
 
-  unsigned long content_length;
-  content_type ctype;
-  char* content;
+	unsigned long content_length;
+	content_type ctype;
+	char* content;
 } request;
 
 typedef struct {
-  char* mime;
-  char* content;
+	char* mime;
+	char* content;
 	unsigned long len;
 } resource;
 
 typedef struct {
 	filemap_partial_object user;
-  mtx_t lock; //transaction lock
+	mtx_t lock; //transaction lock
 	atomic_ulong last_access;
 } user_session;
 
 typedef enum {
-  user_name_i = 0,
-  user_email_i,
-  user_data_i,
-  user_bio_i,
-  user_length_i
+	user_name_i = 0,
+	user_email_i,
+	user_data_i,
+	user_bio_i,
+	user_length_i
 } user_idx;
 
 // data, referenced by/items, path, contributors, html cache
 typedef enum {
-  article_data_i = 0,
-  article_items_i,
-  article_path_i,
-  article_contrib_i,
-  article_html_i,
-  article_length_i
+	article_data_i = 0,
+	article_items_i,
+	article_path_i,
+	article_contrib_i,
+	article_html_i,
+	article_length_i
 } article_idx;
 
 typedef struct {
@@ -104,27 +104,27 @@ typedef struct __attribute__((__packed__)) {
 } word_index;
 
 typedef struct {
-  atomic_ulong accessors;
-  atomic_ulong accesses;
-  time_t first_cache;
+	atomic_ulong accessors;
+	atomic_ulong accesses;
+	time_t first_cache;
 
-  char* data;
-  unsigned long len;
+	char* data;
+	unsigned long len;
 } cached;
 
 typedef struct {
-  struct event_base *evbase;
+	struct event_base *evbase;
 
-  char* global;
-  map_t templates;
-  map_t resources; //without slashes
+	char* global;
+	map_t templates;
+	map_t resources; //without slashes
 
 	EVP_MD_CTX* digest_ctx;
 
-  filemap_t user_fmap;
-  filemap_list_t user_id;
+	filemap_t user_fmap;
+	filemap_list_t user_id;
 
-  filemap_index_t user_by_name;
+	filemap_index_t user_by_name;
 	filemap_index_t user_by_email;
 
 	filemap_t article_fmap;
@@ -135,7 +135,7 @@ typedef struct {
 	filemap_ordered_list_t articles_alphabetical;
 	filemap_ordered_list_t articles_newest;
 
-  map_t user_sessions;
+	map_t user_sessions;
 	map_t user_sessions_by_idx;
 
 	locktable_t word_lock;
@@ -144,32 +144,32 @@ typedef struct {
 
 	map_t wordi_cache;
 
-  map_t article_lock;
+	map_t article_lock;
 
-  map_t cached; //maps to file name of cached portion
+	map_t cached; //maps to file name of cached portion
 } ctx_t;
 
 typedef struct {
-  ctx_t *ctx;
-  struct bufferevent *bev; //buffered socket
+	ctx_t *ctx;
+	struct bufferevent *bev; //buffered socket
 
 	user_session* user_ses;
 	char* auth_tok; //set by router for update
-  
-  struct {
-    char done; //uninitialized req
-    char req_parsed; //request line parsed
+	
+	struct {
+		char done; //uninitialized req
+		char req_parsed; //request line parsed
 
-    char has_content;
-    char content_parsing; //set after first newline
+		char has_content;
+		char content_parsing; //set after first newline
 
 		char* multipart_boundary;
 
-    request req;
-  } parser;
+		request req;
+	} parser;
 
-  vector_t requests;
-  int closed;
+	vector_t requests;
+	int closed;
 } session_t;
 
 void uses_free(user_session* uses) {
@@ -200,7 +200,7 @@ void cleanup_sessions(ctx_t* ctx) {
 			mtx_lock(&user_ses->lock);
 			uses_free(user_ses);
 			map_remove(&ctx->user_sessions_by_idx, &user_ses->user.index);
-      map_next_delete(&iter);
+			map_next_delete(&iter);
 		}
 	}
 }
@@ -212,16 +212,16 @@ cached* ctx_cache_find(ctx_t* ctx, char* name) {
 	if (cache) atomic_fetch_add(&cache->accessors, 1);
 	rwlock_unread(ctx->cached.lock);
 	
-  return cache;
+	return cache;
 }
 
 cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len) {
-  cached new = {.data=data, .len=len};
-  new.first_cache = time(NULL);
-  atomic_init(&new.accesses, 0);
-  atomic_init(&new.accessors, 1);
+	cached new = {.data=data, .len=len};
+	new.first_cache = time(NULL);
+	atomic_init(&new.accesses, 0);
+	atomic_init(&new.accessors, 1);
 
-  map_insert_result insres = map_insertcpy_noexist(&ctx->cached, &name, &new);
+	map_insert_result insres = map_insertcpy_noexist(&ctx->cached, &name, &new);
 
 	//in case of high traffic, use map lock as synchronization
 	//hah! high traffic!??! never lmao
@@ -235,97 +235,97 @@ cached* ctx_cache_new(ctx_t* ctx, char* name, char* data, unsigned long len) {
 }
 
 void ctx_cache_done(ctx_t* ctx, cached* cache, char* name) {
-  time_t t = time(NULL);
+	time_t t = time(NULL);
 
-  unsigned long accs = atomic_fetch_add(&cache->accesses, 1)+1;
+	unsigned long accs = atomic_fetch_add(&cache->accesses, 1)+1;
 
 	int delete = accs*3600/difftime(t, cache->first_cache) < CACHE_MIN;
 	if (delete) rwlock_write(ctx->cached.lock);
 	
 	unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
 
-  //small race...
-  if (acc == 1 && difftime(t, cache->first_cache) >= CACHE_EXPIRY) {
-    cache->first_cache = t;
-    atomic_store(&cache->accesses, 1);
+	//small race...
+	if (acc == 1 && difftime(t, cache->first_cache) >= CACHE_EXPIRY) {
+		cache->first_cache = t;
+		atomic_store(&cache->accesses, 1);
 
-  } else if (delete && acc==1) {
-    drop(cache->data);
-    map_remove_unlocked(&ctx->cached, &name);
-  }
+	} else if (delete && acc==1) {
+		drop(cache->data);
+		map_remove_unlocked(&ctx->cached, &name);
+	}
 	
 	if (delete) rwlock_unwrite(ctx->cached.lock);
 }
 
 void ctx_cache_remove(ctx_t* ctx, char* name) {
-  cached* cache = map_find(&ctx->cached, &name);
-  if (cache) {
-    atomic_fetch_add(&cache->accessors, 1);
+	cached* cache = map_find(&ctx->cached, &name);
+	if (cache) {
+		atomic_fetch_add(&cache->accessors, 1);
 
 		rwlock_write(ctx->cached.lock);
-    unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
+		unsigned long acc = atomic_fetch_sub(&cache->accessors, 1);
 
-    if (acc == 1) {
-      drop(cache->data);
-      map_remove_unlocked(&ctx->cached, &name);
-    }
+		if (acc == 1) {
+			drop(cache->data);
+			map_remove_unlocked(&ctx->cached, &name);
+		}
 		
 		rwlock_unwrite(ctx->cached.lock);
-  }
+	}
 }
 
 cached* ctx_fopen(ctx_t* ctx, char* name) {
-  cached* cache = ctx_cache_find(ctx, name);
+	cached* cache = ctx_cache_find(ctx, name);
 
-  if (!cache) {
-    FILE* f = fopen(name, "r");
+	if (!cache) {
+		FILE* f = fopen(name, "r");
 		if (!f) return NULL;
 		
-    fseek(f, 0, SEEK_END);
-    unsigned long len = ftell(f);
+		fseek(f, 0, SEEK_END);
+		unsigned long len = ftell(f);
 
-    char* data = heap(len);
-    fseek(f, 0, SEEK_SET);
-    fread(data, len, 1, f);
+		char* data = heap(len);
+		fseek(f, 0, SEEK_SET);
+		fread(data, len, 1, f);
 
-    fclose(f);
+		fclose(f);
 
-    cache = ctx_cache_new(ctx, heapcpystr(name), data, len);
-  }
+		cache = ctx_cache_new(ctx, heapcpystr(name), data, len);
+	}
 
-  return cache;
+	return cache;
 }
 
 //lock by key, to ensure it is one to one with list index
 void lock_article(ctx_t* ctx, char* path, unsigned long sz) {
-  //read lock
-  map_sized_t key = {.bin=path, .size=sz};
-  mtx_t* m = map_find(&ctx->article_lock, &key);
+	//read lock
+	map_sized_t key = {.bin=path, .size=sz};
+	mtx_t* m = map_find(&ctx->article_lock, &key);
 
-  if (!m) {
-    //copy path and write lock
-    key.bin = heapcpy(sz, path);
+	if (!m) {
+		//copy path and write lock
+		key.bin = heapcpy(sz, path);
 
-    m = map_insert(&ctx->article_lock, &key).val;
-    mtx_init(m, mtx_plain);
-  }
-  
-  mtx_lock(m);
+		m = map_insert(&ctx->article_lock, &key).val;
+		mtx_init(m, mtx_plain);
+	}
+	
+	mtx_lock(m);
 }
 
 void unlock_article(ctx_t* ctx, char* path, unsigned long sz) {
-  map_sized_t key = {.bin=path, .size=sz};
-  mtx_t* m = map_find(&ctx->article_lock, &key);
+	map_sized_t key = {.bin=path, .size=sz};
+	mtx_t* m = map_find(&ctx->article_lock, &key);
 	
 	if (!m) return; //insertion synchronization error (find-then-insert) or a mysterious bug
 	
 	mtx_unlock(m);
 
-  if (m && mtx_trylock(m) == thrd_success) {
-    mtx_destroy(m);
+	if (m && mtx_trylock(m) == thrd_success) {
+		mtx_destroy(m);
 
-    map_remove(&ctx->article_lock, &key);
-  }
+		map_remove(&ctx->article_lock, &key);
+	}
 }
 
 typedef enum __attribute__((__packed__)) {
@@ -378,14 +378,14 @@ typedef enum __attribute__((__packed__)) {
 	article_text = 0,
 	article_group,
 	article_img,
-  article_dead
+	article_dead
 } article_type;
 
 typedef struct __attribute__((__packed__)) {
 	article_type ty;
 	uint32_t path_length;
 
-  uint64_t contributors;
+	uint64_t contributors;
 
 	union {
 		uint64_t items;

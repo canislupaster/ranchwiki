@@ -12,18 +12,18 @@
 #define DATA_PATH "./data/"
 
 typedef struct {
-  uint64_t pos;
-  char* txt;
+	uint64_t pos;
+	char* txt;
 } add_t;
 
 typedef struct {
-  uint64_t pos;
+	uint64_t pos;
 	char* txt;
 } del_t;
 
 typedef struct {
-  vector_t additions;
-  vector_t deletions;
+	vector_t additions;
+	vector_t deletions;
 	uint64_t author;
 	uint64_t time;
 	
@@ -31,51 +31,51 @@ typedef struct {
 } diff_t;
 
 typedef struct {
-  FILE* file;
+	FILE* file;
 
-  char* current;
-  vector_t diffs;
+	char* current;
+	vector_t diffs;
 } text_t;
 
 int skipline(char** str) {
-  while (**str != '\n' && **str != '\r' && **str) (*str)++;
+	while (**str != '\n' && **str != '\r' && **str) (*str)++;
 	if (!**str) return 0;
 	
-  (*str)++;
+	(*str)++;
 	if (**str=='\n') (*str)++;
 	
 	return 1;
 }
 
 size_t skipline_i(char* str) {
-  size_t i=0;
+	size_t i=0;
 
-  while (*str != '\r' && *str != '\n' && *str) {
-    i++;
-    str++;
-  }
-  
-  return i;
+	while (*str != '\r' && *str != '\n' && *str) {
+		i++;
+		str++;
+	}
+	
+	return i;
 }
 
 //returns beginning of matching line
 char* search_line(char* search, char* line, size_t linelen) {
-  size_t len;
-  while (*search && (len = skipline_i(search))) {
-    if (len == linelen && strncmp(search, line, len)==0) return search;
-    search += len;
+	size_t len;
+	while (*search && (len = skipline_i(search))) {
+		if (len == linelen && strncmp(search, line, len)==0) return search;
+		search += len;
 		
 		skipline(&search);
-  }
+	}
 
-  return NULL;
+	return NULL;
 }
 
 //copies (obv...)
 int parse_wiki_path(char* path, vector_t* vec) {
 	int alphabetical = 0;
 
-  while (*path && *path=='/') path++;
+	while (*path && *path=='/') path++;
 	char* segment = path;
 
 	while (*path) {
@@ -101,11 +101,11 @@ int parse_wiki_path(char* path, vector_t* vec) {
 
 			int len = path - segment;
 			char* s = heapcpy(len+1, segment);
-      vector_pushcpy(vec, &s);
+			vector_pushcpy(vec, &s);
 
-      s[len] = 0;
+			s[len] = 0;
 
-      if (*path) path++;
+			if (*path) path++;
 			segment = path;
 		}
 	}
@@ -117,54 +117,54 @@ int parse_wiki_path(char* path, vector_t* vec) {
 
 //may keep references to "to"
 diff_t find_changes(char* from, char* to) {
-  diff_t d;
-  d.additions = vector_new(sizeof(add_t));
-  d.deletions = vector_new(sizeof(del_t));
+	diff_t d;
+	d.additions = vector_new(sizeof(add_t));
+	d.deletions = vector_new(sizeof(del_t));
 
-  if (!from) {
-    vector_pushcpy(&d.additions, &(add_t){.pos=0, .txt=heapcpystr(to)});
+	if (!from) {
+		vector_pushcpy(&d.additions, &(add_t){.pos=0, .txt=heapcpystr(to)});
 		return d;
-  }
+	}
 
-  char* from_start = from;
+	char* from_start = from;
 
-  char* insertion=to, *deletion=from;
+	char* insertion=to, *deletion=from;
 
-  while (*to || *from) {
-    size_t from_skip_len = skipline_i(from);
+	while (*to || *from) {
+		size_t from_skip_len = skipline_i(from);
 		size_t to_skip_len = skipline_i(to);
 
-    if (from_skip_len != to_skip_len || strncmp(from, to, from_skip_len)!=0) {
-      while (1) {
-        deletion = search_line(from, to, to_skip_len); //includes newline at start of line
+		if (from_skip_len != to_skip_len || strncmp(from, to, from_skip_len)!=0) {
+			while (1) {
+				deletion = search_line(from, to, to_skip_len); //includes newline at start of line
 
-        if (deletion || !*to) { //EOF or skip
-          if (!*to) {
-            deletion = from + strlen(from); //delete and insert to EOF, if EOF
-          }
+				if (deletion || !*to) { //EOF or skip
+					if (!*to) {
+						deletion = from + strlen(from); //delete and insert to EOF, if EOF
+					}
 
-          if (to > insertion) {
-            add_t* add = vector_pushcpy(&d.additions, &(add_t){.pos=from-from_start, .txt=heap(to-insertion+1)});
-            strncpy(add->txt, insertion, to-insertion);
-            add->txt[to-insertion] = 0;
-          }
+					if (to > insertion) {
+						add_t* add = vector_pushcpy(&d.additions, &(add_t){.pos=from-from_start, .txt=heap(to-insertion+1)});
+						strncpy(add->txt, insertion, to-insertion);
+						add->txt[to-insertion] = 0;
+					}
 
-          if (deletion > from) {
-            del_t* del = vector_pushcpy(&d.deletions, &(del_t){.pos=from-from_start, .txt=heap(deletion-from+1)});
-            strncpy(del->txt, from, deletion-from);
+					if (deletion > from) {
+						del_t* del = vector_pushcpy(&d.deletions, &(del_t){.pos=from-from_start, .txt=heap(deletion-from+1)});
+						strncpy(del->txt, from, deletion-from);
 						del->txt[deletion-from] = 0;
 						from = deletion;
-          }
-          
-          break;
-        }
+					}
+					
+					break;
+				}
 
 				to += to_skip_len;
 				skipline(&to);
 				
-        to_skip_len = skipline_i(to);
-      }
-    } else {
+				to_skip_len = skipline_i(to);
+			}
+		} else {
 			from += from_skip_len;
 			to += to_skip_len;
 			
@@ -176,70 +176,70 @@ diff_t find_changes(char* from, char* to) {
 				skipline(&to);
 				insertion = to;
 			}
-    }
-  }
+		}
+	}
 
-  return d;
+	return d;
 }
 
 void group_new(char* dirname) {
-  mkdir(dirname, 0775);
+	mkdir(dirname, 0775);
 }
 
 vector_t make_path(vector_t* path) {
-  vector_t out_path = vector_new(1);
-  vector_stockstr(&out_path, DATA_PATH);
+	vector_t out_path = vector_new(1);
+	vector_stockstr(&out_path, DATA_PATH);
 
-  vector_iterator iter = vector_iterate(path);
+	vector_iterator iter = vector_iterate(path);
 
-  while (vector_next(&iter)) {
-    char* segment = *(char**)iter.x;
-    vector_stockcpy(&out_path, strlen(segment), segment);
+	while (vector_next(&iter)) {
+		char* segment = *(char**)iter.x;
+		vector_stockcpy(&out_path, strlen(segment), segment);
 
-    if (iter.i != path->length) {
-      vector_pushcpy(&out_path, "/");
-      vector_pushcpy(&out_path, "\0");
+		if (iter.i != path->length) {
+			vector_pushcpy(&out_path, "/");
+			vector_pushcpy(&out_path, "\0");
 
-      group_new(out_path.data);
+			group_new(out_path.data);
 
-      vector_pop(&out_path);
-    }
-  }
+			vector_pop(&out_path);
+		}
+	}
 
-  vector_pushcpy(&out_path, "\0");
-  return out_path;
+	vector_pushcpy(&out_path, "\0");
+	return out_path;
 }
 
 text_t txt_new(char* filename) {
-  text_t txt;
+	text_t txt;
 
-  txt.file = fopen(filename, "rb+");
-  if (!txt.file) {
-    txt.file = fopen(filename, "wb+");
-  }
+	txt.file = fopen(filename, "rb+");
+	if (!txt.file) {
+		txt.file = fopen(filename, "wb+");
+	}
 
-  txt.diffs = vector_new(sizeof(diff_t));
-  return txt;
+	txt.diffs = vector_new(sizeof(diff_t));
+	return txt;
 }
 
 void add_diff(text_t* txt, diff_t* d, char* current_str) {
-  char one = 1;	 //prefix uint64s with one for a prefix encoding of diff separators
+	char one = 1;	 //prefix uint64s with one for a prefix encoding of diff separators
 
-  uint64_t current = 9;
-  fseek(txt->file, 1, SEEK_SET);
-  if (fread(&current, 8, 1, txt->file) < 1) {
+	uint64_t current = 9;
+	fseek(txt->file, 1, SEEK_SET);
+	if (fread(&current, 8, 1, txt->file) < 1) {
 		fseek(txt->file, 0, SEEK_SET);
-    fwrite(&one, 1, 1, txt->file);
-    fwrite(&current, 8, 1, txt->file); //pad beginning, we will rewrite later
-  }
-  
-  uint64_t len, prev;
+		fwrite(&one, 1, 1, txt->file);
+		fwrite(&current, 8, 1, txt->file); //pad beginning, we will rewrite later
+	}
+	
+	uint64_t len, prev;
 
-  fseek(txt->file, current+1, SEEK_SET);
+	fseek(txt->file, current+1, SEEK_SET);
 	
 	//replace current with diff
 	
-  if (fread(&prev, 8, 1, txt->file) < 1)
+	if (fread(&prev, 8, 1, txt->file) < 1)
 		prev = 0;
 
 	fseek(txt->file, current, SEEK_SET);
@@ -256,78 +256,78 @@ void add_diff(text_t* txt, diff_t* d, char* current_str) {
 	fwrite(&one, 1, 1, txt->file);
 	fwrite(&d->time, 8, 1, txt->file);
 
-  len = (uint64_t)d->additions.length;
-  fwrite(&one, 1, 1, txt->file);
-  fwrite(&len, 8, 1, txt->file);
+	len = (uint64_t)d->additions.length;
+	fwrite(&one, 1, 1, txt->file);
+	fwrite(&len, 8, 1, txt->file);
 
-  vector_iterator add_iter = vector_iterate(&d->additions);
-  while (vector_next(&add_iter)) {
-    add_t* add = add_iter.x;
-    fwrite(&one, 1, 1, txt->file);
-    fwrite(&add->pos, 8, 1, txt->file);
+	vector_iterator add_iter = vector_iterate(&d->additions);
+	while (vector_next(&add_iter)) {
+		add_t* add = add_iter.x;
+		fwrite(&one, 1, 1, txt->file);
+		fwrite(&add->pos, 8, 1, txt->file);
 
-    len = strlen(add->txt);
-    fwrite(&one, 1, 1, txt->file);
-    fwrite(&len, 8, 1, txt->file);
+		len = strlen(add->txt);
+		fwrite(&one, 1, 1, txt->file);
+		fwrite(&len, 8, 1, txt->file);
 
-    fwrite(add->txt, len, 1, txt->file);
-  }
+		fwrite(add->txt, len, 1, txt->file);
+	}
 
-  len = (uint64_t)d->deletions.length;
-  fwrite(&one, 1, 1, txt->file);
-  fwrite(&len, 8, 1, txt->file);
+	len = (uint64_t)d->deletions.length;
+	fwrite(&one, 1, 1, txt->file);
+	fwrite(&len, 8, 1, txt->file);
 
-  vector_iterator del_iter = vector_iterate(&d->deletions);
-  while (vector_next(&del_iter)) {
-    del_t* del = del_iter.x;
-    fwrite(&one, 1, 1, txt->file);
-    fwrite(&del->pos, 8, 1, txt->file);
+	vector_iterator del_iter = vector_iterate(&d->deletions);
+	while (vector_next(&del_iter)) {
+		del_t* del = del_iter.x;
+		fwrite(&one, 1, 1, txt->file);
+		fwrite(&del->pos, 8, 1, txt->file);
 
 		len = strlen(del->txt);
 		fwrite(&one, 1, 1, txt->file);
 		fwrite(&len, 8, 1, txt->file);
 
 		fwrite(del->txt, len, 1, txt->file);
-  }
+	}
 
-  uint64_t new_current = ftell(txt->file);
+	uint64_t new_current = ftell(txt->file);
 
-  fwrite(&one, 1, 1, txt->file);
-  fwrite(&current, 8, 1, txt->file); //write prev
+	fwrite(&one, 1, 1, txt->file);
+	fwrite(&current, 8, 1, txt->file); //write prev
 
-  len = strlen(current_str);
-  fwrite(&one, 1, 1, txt->file);
-  fwrite(&len, 8, 1, txt->file);
+	len = strlen(current_str);
+	fwrite(&one, 1, 1, txt->file);
+	fwrite(&len, 8, 1, txt->file);
 
-  fwrite(current_str, len, 1, txt->file);
+	fwrite(current_str, len, 1, txt->file);
 
-  fseek(txt->file, 0, SEEK_SET);
-  fwrite(&one, 1, 1, txt->file);
-  fwrite(&new_current, 8, 1, txt->file);
+	fseek(txt->file, 0, SEEK_SET);
+	fwrite(&one, 1, 1, txt->file);
+	fwrite(&new_current, 8, 1, txt->file);
 }
 
 void read_txt(text_t* txt, uint64_t start, uint64_t max) {
-  fseek(txt->file, 1, SEEK_SET);
-  
-  uint64_t current, length, prev;
-  if (fread(&current, 8, 1, txt->file)<1) {
+	fseek(txt->file, 1, SEEK_SET);
+	
+	uint64_t current, length, prev;
+	if (fread(&current, 8, 1, txt->file)<1) {
 		txt->current = NULL;
 		return;
 	}
 
-  fseek(txt->file, current+1, SEEK_SET);
+	fseek(txt->file, current+1, SEEK_SET);
 
-  //prev diff | length | data
-  fread(&prev, 8, 1, txt->file);
+	//prev diff | length | data
+	fread(&prev, 8, 1, txt->file);
 	fseek(txt->file, 1, SEEK_CUR);
-  fread(&length, 8, 1, txt->file);
-  
-  txt->current = heap(length+1);
-  txt->current[length] = 0;
+	fread(&length, 8, 1, txt->file);
+	
+	txt->current = heap(length+1);
+	txt->current[length] = 0;
 
-  fread(txt->current, length, 1, txt->file);
+	fread(txt->current, length, 1, txt->file);
 
-  for (uint64_t i=0; prev>0 && i<max; i++) {
+	for (uint64_t i=0; prev>0 && i<max; i++) {
 		if (start>0 && i==0) {
 			fseek(txt->file, 0, SEEK_END);
 			if (start >= ftell(txt->file)) return;
@@ -342,12 +342,12 @@ void read_txt(text_t* txt, uint64_t start, uint64_t max) {
 		} else {
 			fseek(txt->file, prev+10+1, SEEK_SET); //skip prefix and one
 		}
-    
-    fread(&prev, 8, 1, txt->file);
+		
+		fread(&prev, 8, 1, txt->file);
 
-    diff_t* d = vector_push(&txt->diffs);
-    d->additions = vector_new(sizeof(add_t));
-    d->deletions = vector_new(sizeof(del_t));
+		diff_t* d = vector_push(&txt->diffs);
+		d->additions = vector_new(sizeof(add_t));
+		d->deletions = vector_new(sizeof(del_t));
 		d->prev = prev;
 
 		fseek(txt->file, 1, SEEK_CUR);
@@ -357,33 +357,33 @@ void read_txt(text_t* txt, uint64_t start, uint64_t max) {
 		fread(&d->time, 8, 1, txt->file);
 
 		fseek(txt->file, 1, SEEK_CUR);
-    fread(&length, 8, 1, txt->file); //length of additions
+		fread(&length, 8, 1, txt->file); //length of additions
 
-    uint64_t length2;
+		uint64_t length2;
 
-    for (uint64_t i=0; i<length; i++) {
-      add_t* add = vector_push(&d->additions);
-      
+		for (uint64_t i=0; i<length; i++) {
+			add_t* add = vector_push(&d->additions);
+			
 			fseek(txt->file, 1, SEEK_CUR);
 			fread(&add->pos, 8, 1, txt->file);
 			fseek(txt->file, 1, SEEK_CUR);
-      fread(&length2, 8, 1, txt->file);
-      
-      add->txt = heap(length2+1);
-      add->txt[length2] = 0;
+			fread(&length2, 8, 1, txt->file);
+			
+			add->txt = heap(length2+1);
+			add->txt[length2] = 0;
 
-      fread(add->txt, length2, 1, txt->file);
-    }
+			fread(add->txt, length2, 1, txt->file);
+		}
 
 		fseek(txt->file, 1, SEEK_CUR);
-    fread(&length, 8, 1, txt->file); //length of deletions
+		fread(&length, 8, 1, txt->file); //length of deletions
 
-    //same fokin thing
-    for (uint64_t i=0; i<length; i++) {
-      del_t* del = vector_push(&d->deletions);
-      
+		//same fokin thing
+		for (uint64_t i=0; i<length; i++) {
+			del_t* del = vector_push(&d->deletions);
+			
 			fseek(txt->file, 1, SEEK_CUR);
-      fread(&del->pos, 8, 1, txt->file);
+			fread(&del->pos, 8, 1, txt->file);
 			fseek(txt->file, 1, SEEK_CUR);
 			fread(&length2, 8, 1, txt->file);
 
@@ -391,8 +391,8 @@ void read_txt(text_t* txt, uint64_t start, uint64_t max) {
 			del->txt[length2] = 0;
 
 			fread(del->txt, length2, 1, txt->file);
-    }
-  }
+		}
+	}
 }
 
 typedef struct {
@@ -503,28 +503,28 @@ vector_t display_diffs(text_t* txt) {
 }
 
 void diff_free(diff_t* d) {
-  vector_iterator add_iter = vector_iterate(&d->additions);
-  while (vector_next(&add_iter)) {
-    drop(((add_t*)add_iter.x)->txt);
-  }
+	vector_iterator add_iter = vector_iterate(&d->additions);
+	while (vector_next(&add_iter)) {
+		drop(((add_t*)add_iter.x)->txt);
+	}
 
-  vector_iterator del_iter = vector_iterate(&d->deletions);
-  while (vector_next(&del_iter)) {
-    drop(((del_t*)del_iter.x)->txt);
-  }
+	vector_iterator del_iter = vector_iterate(&d->deletions);
+	while (vector_next(&del_iter)) {
+		drop(((del_t*)del_iter.x)->txt);
+	}
 	
 	vector_free(&d->additions);
 	vector_free(&d->deletions);
 }
 
 void txt_free(text_t* txt) {
-  vector_iterator diff_iter = vector_iterate(&txt->diffs);
-  while (vector_next(&diff_iter)) {
-    diff_free(diff_iter.x);
+	vector_iterator diff_iter = vector_iterate(&txt->diffs);
+	while (vector_next(&diff_iter)) {
+		diff_free(diff_iter.x);
 	}
 	
 	vector_free(&txt->diffs);
 
 	drop(txt->current);
-  fclose(txt->file);
+	fclose(txt->file);
 }

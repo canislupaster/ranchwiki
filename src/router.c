@@ -22,8 +22,8 @@
 permissions_t get_perms(session_t* session) {
 	if (!session->user_ses) return perms_none;
 
-  filemap_field udata =
-      filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_data_i);
+	filemap_field udata =
+			filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_data_i);
 
 	permissions_t perms = ((userdata_t*)udata.val.data)->perms;
 	vector_free(&udata.val);
@@ -44,49 +44,49 @@ cached* article_current(ctx_t* ctx, vector_t* filepath) {
 }
 
 vector_t article_group_list(ctx_t* ctx, filemap_object* article, articledata_t* data, vector_t* item_strs) {
-  vector_t items = {.data = article->fields[article_items_i],
-    .size = sizeof(uint64_t),
-    .length = data->items};
+	vector_t items = {.data = article->fields[article_items_i],
+		.size = sizeof(uint64_t),
+		.length = data->items};
 
-  vector_t items_arg = vector_new(sizeof(template_args));
+	vector_t items_arg = vector_new(sizeof(template_args));
 
-  vector_iterator iter = vector_iterate(&items);
-  while (vector_next(&iter)) {
-    filemap_partial_object list_item = filemap_get_idx(&ctx->article_id, *(uint64_t*)iter.x);
-    if (!list_item.exists) continue;
+	vector_iterator iter = vector_iterate(&items);
+	while (vector_next(&iter)) {
+		filemap_partial_object list_item = filemap_get_idx(&ctx->article_id, *(uint64_t*)iter.x);
+		if (!list_item.exists) continue;
 
-    articledata_t* item_data =
-      (articledata_t*)filemap_cpyfield(&ctx->article_fmap, &list_item, article_data_i).val.data;
+		articledata_t* item_data =
+			(articledata_t*)filemap_cpyfield(&ctx->article_fmap, &list_item, article_data_i).val.data;
 
 		if (item_data->ty==article_dead) {
 			drop(item_data);
 			continue;
 		}
 		
-    int is_group = item_data->ty==article_group;
+		int is_group = item_data->ty==article_group;
 
-    vector_t item_pathdata = filemap_cpyfield(&ctx->article_fmap, &list_item, article_path_i).val;
+		vector_t item_pathdata = filemap_cpyfield(&ctx->article_fmap, &list_item, article_path_i).val;
 
-    vector_t item_path = vector_from_strings(item_pathdata.data, item_data->path_length);
-    char* item_end = heapcpystr(vector_getstr(&item_path, item_path.length-1));
+		vector_t item_path = vector_from_strings(item_pathdata.data, item_data->path_length);
+		char* item_end = heapcpystr(vector_getstr(&item_path, item_path.length-1));
 
-    vector_t url = vector_new(1);
-    vector_stockstr(&url, "/wiki/");
-    vector_flatten_strings(&item_path, &url, "/", 1);
-    vector_pushcpy(&url, "\0");
+		vector_t url = vector_new(1);
+		vector_stockstr(&url, "/wiki/");
+		vector_flatten_strings(&item_path, &url, "/", 1);
+		vector_pushcpy(&url, "\0");
 
-    vector_pushcpy(&items_arg, &(template_args){.cond_args=heapcpy(sizeof(int), &is_group),
-      .sub_args=heapcpy(sizeof(char*[2]), (char*[2]){url.data, item_end})});
+		vector_pushcpy(&items_arg, &(template_args){.cond_args=heapcpy(sizeof(int), &is_group),
+			.sub_args=heapcpy(sizeof(char*[2]), (char*[2]){url.data, item_end})});
 
-    vector_pushcpy(item_strs, &item_end);
-    vector_pushcpy(item_strs, &url.data);
+		vector_pushcpy(item_strs, &item_end);
+		vector_pushcpy(item_strs, &url.data);
 
-    drop(item_data);
+		drop(item_data);
 		vector_free(&item_path);
-    vector_free(&item_pathdata);
-  }
+		vector_free(&item_pathdata);
+	}
 
-  return items_arg;
+	return items_arg;
 }
 
 vector_t flatten_path(vector_t* path) {
@@ -97,18 +97,18 @@ vector_t flatten_path(vector_t* path) {
 }
 
 vector_t flatten_url(vector_t* path) {
-  vector_t flattened = vector_new(1);
-  vector_flatten_strings(path, &flattened, "/", 1);
-  vector_pushcpy(&flattened, "\0");
-  return flattened;
+	vector_t flattened = vector_new(1);
+	vector_flatten_strings(path, &flattened, "/", 1);
+	vector_pushcpy(&flattened, "\0");
+	return flattened;
 }
 
 vector_t flatten_wikipath(vector_t* path) {
-  vector_t flattened = vector_new(1);
+	vector_t flattened = vector_new(1);
 	vector_stockstr(&flattened, DATA_PATH);
-  vector_flatten_strings(path, &flattened, "/", 1);
-  vector_pushcpy(&flattened, "\0");
-  return flattened;
+	vector_flatten_strings(path, &flattened, "/", 1);
+	vector_pushcpy(&flattened, "\0");
+	return flattened;
 }
 
 int render_article(ctx_t* ctx, char** article, int render, vector_t* refs, vector_t* words) {
@@ -346,19 +346,19 @@ void update_article_keywords(ctx_t* ctx, vector_t* add_keywords, vector_t* remov
 					continue;
 				}
 				
-			  word_index wid;
-			  memset(&wid, 0, sizeof(word_index));
+				word_index wid;
+				memset(&wid, 0, sizeof(word_index));
 				wid.tok[0] = atok;
 
-			  filemap_object obj = filemap_push(&ctx->wordi_fmap,
-							    (char*[]){tok->word, (char*)&wid},
-							    (uint64_t[]){strlen(tok->word), sizeof(word_index)});
+				filemap_object obj = filemap_push(&ctx->wordi_fmap,
+									(char*[]){tok->word, (char*)&wid},
+									(uint64_t[]){strlen(tok->word), sizeof(word_index)});
 
-			  partial = filemap_insert(&ctx->words, &obj);
-			  map_insertcpy(&ctx->wordi_cache, &key, &partial);
+				partial = filemap_insert(&ctx->words, &obj);
+				map_insertcpy(&ctx->wordi_cache, &key, &partial);
 				
 				locktable_unlock_key(&ctx->word_lock, tok->word, strlen(tok->word));
-			  continue;
+				continue;
 			} else {
 				map_insertcpy(&ctx->wordi_cache, &key, &partial);
 			}
@@ -719,7 +719,7 @@ int article_lock_groups(ctx_t* ctx, vector_t* path, vector_t* flattened, vector_
 	while (vector_next(&iter)) {
 		unsigned long segment_len = strlen(*(char**)iter.x);
 
-		key_len -= segment_len + 1;  //\0 is a delimeter
+		key_len -= segment_len + 1;	//\0 is a delimeter
 
 		lock_article(ctx, flattened->data, key_len);
 
@@ -767,7 +767,7 @@ void article_group_insert(ctx_t* ctx, vector_t* groups, vector_t* path, vector_t
 
 		unsigned long segment_len = strlen(vector_getstr(path, path->length-iter.i));
 
-		key_len -= segment_len + 1;  //\0 is a delimeter
+		key_len -= segment_len + 1;	//\0 is a delimeter
 
 		filemap_partial_object* new_group = iter.x;
 
@@ -1066,18 +1066,18 @@ void session_auth(session_t* session, filemap_partial_object idx) {
 }
 
 void route(session_t* session, request* req) {
-  if (req->path.length == 0) {
-    filemap_object top = filemap_findcpy(&session->ctx->article_by_name, "", 0);
+	if (req->path.length == 0) {
+		filemap_object top = filemap_findcpy(&session->ctx->article_by_name, "", 0);
 
-    vector_t items_arg;
-    vector_t item_strs = vector_new(sizeof(char*));
+		vector_t items_arg;
+		vector_t item_strs = vector_new(sizeof(char*));
 
-    if (top.exists) {
-      articledata_t* data = (articledata_t*)top.fields[article_data_i];
-      items_arg = article_group_list(session->ctx, &top, data, &item_strs);
-    } else {
-      items_arg = vector_new(sizeof(template_args));
-    }
+		if (top.exists) {
+			articledata_t* data = (articledata_t*)top.fields[article_data_i];
+			items_arg = article_group_list(session->ctx, &top, data, &item_strs);
+		} else {
+			items_arg = vector_new(sizeof(template_args));
+		}
 
 		if (session->user_ses) {
 			filemap_field uname = filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_name_i);
@@ -1088,135 +1088,135 @@ void route(session_t* session, request* req) {
 			respond_template(session, 200, "home", "ranch", 0, 0, &items_arg, "");
 		}
 
-    filemap_object_free(&session->ctx->article_fmap, &top);
-    vector_free_strings(&item_strs);
+		filemap_object_free(&session->ctx->article_fmap, &top);
+		vector_free_strings(&item_strs);
 
-    return;
-  }
+		return;
+	}
 
-  char* base = vector_getstr(&req->path, 0);
+	char* base = vector_getstr(&req->path, 0);
 
-  if (strcmp(base, "login") == 0 && req->method == GET) {
-    respond_template(session, 200, "login", "Login", 0, "");
+	if (strcmp(base, "login") == 0 && req->method == GET) {
+		respond_template(session, 200, "login", "Login", 0, "");
 
-  } else if (strcmp(base, "register") == 0 && req->method == POST) {
-    vector_t params = query_find(
-        &req->query, (char*[]){"username", "email", "password"}, 3, 1);
+	} else if (strcmp(base, "register") == 0 && req->method == POST) {
+		vector_t params = query_find(
+				&req->query, (char*[]){"username", "email", "password"}, 3, 1);
 
-    if (params.length != 3) {
-      respond_error(session, 400, "Username email and password not provided");
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 3) {
+			respond_error(session, 400, "Username email and password not provided");
+			vector_free(&params);
+			return;
+		}
 
-    char *username = vector_getstr(&params, 0),
-         *email = vector_getstr(&params, 1),
-         *password = vector_getstr(&params, 2);
+		char *username = vector_getstr(&params, 0),
+				 *email = vector_getstr(&params, 1),
+				 *password = vector_getstr(&params, 2);
 
-    char* err = user_error(username, email);
-    if (err) {
-      respond_template(session, 200, "login", "Login", 1, err);
-      vector_free(&params);
-      return;
-    }
+		char* err = user_error(username, email);
+		if (err) {
+			respond_template(session, 200, "login", "Login", 1, err);
+			vector_free(&params);
+			return;
+		}
 
-    char* passerr = user_password_error(password);
-    if (passerr) {
-      respond_template(session, 200, "login", "Login", 1, passerr);
-      vector_free(&params);
-      return;
-    }
+		char* passerr = user_password_error(password);
+		if (passerr) {
+			respond_template(session, 200, "login", "Login", 1, passerr);
+			vector_free(&params);
+			return;
+		}
 
-    filemap_partial_object name_user =
-        filemap_find(&session->ctx->user_by_name,
-                     username, strlen(username) + 1);
-    filemap_partial_object email_user =
-        filemap_find(&session->ctx->user_by_email,
-                     email, strlen(email) + 1);
+		filemap_partial_object name_user =
+				filemap_find(&session->ctx->user_by_name,
+										 username, strlen(username) + 1);
+		filemap_partial_object email_user =
+				filemap_find(&session->ctx->user_by_email,
+										 email, strlen(email) + 1);
 
-    if (name_user.exists || email_user.exists) {
-      respond_template(session, 200, "login", "Login", 1, "Email or username already taken");
-      vector_free(&params);
-      return;
-    }
+		if (name_user.exists || email_user.exists) {
+			respond_template(session, 200, "login", "Login", 1, "Email or username already taken");
+			vector_free(&params);
+			return;
+		}
 
-    userdata_t data;
-    data.perms = perms_none;
+		userdata_t data;
+		data.perms = perms_none;
 
-    RAND_bytes((unsigned char*)&data.salt, 4);
-    // lmao
-    EVP_DigestInit_ex(session->ctx->digest_ctx, EVP_sha256(), NULL);
-    EVP_DigestUpdate(session->ctx->digest_ctx, password, strlen(password));
-    EVP_DigestUpdate(session->ctx->digest_ctx, &data.salt, 4);
+		RAND_bytes((unsigned char*)&data.salt, 4);
+		// lmao
+		EVP_DigestInit_ex(session->ctx->digest_ctx, EVP_sha256(), NULL);
+		EVP_DigestUpdate(session->ctx->digest_ctx, password, strlen(password));
+		EVP_DigestUpdate(session->ctx->digest_ctx, &data.salt, 4);
 
-    EVP_DigestFinal_ex(session->ctx->digest_ctx, data.password_hash, NULL);
+		EVP_DigestFinal_ex(session->ctx->digest_ctx, data.password_hash, NULL);
 
-    filemap_object user = filemap_push(
-        &session->ctx->user_fmap, (char*[]){username, email, (char*)&data, ""},
-        (uint64_t[]){strlen(username) + 1, strlen(email) + 1,
-                     sizeof(userdata_t), 1});
+		filemap_object user = filemap_push(
+				&session->ctx->user_fmap, (char*[]){username, email, (char*)&data, ""},
+				(uint64_t[]){strlen(username) + 1, strlen(email) + 1,
+										 sizeof(userdata_t), 1});
 
-    filemap_partial_object idx = filemap_add(&session->ctx->user_id, &user);
+		filemap_partial_object idx = filemap_add(&session->ctx->user_id, &user);
 
-    filemap_object user_ref = filemap_index_obj(&user, &idx);
-    filemap_insert(&session->ctx->user_by_name, &user_ref);
-    filemap_insert(&session->ctx->user_by_name, &user_ref);
+		filemap_object user_ref = filemap_index_obj(&user, &idx);
+		filemap_insert(&session->ctx->user_by_name, &user_ref);
+		filemap_insert(&session->ctx->user_by_name, &user_ref);
 
 		session_auth(session, idx);
 
-    respond_redirect(session, "/account");
+		respond_redirect(session, "/account");
 		vector_free(&params);
 
-  } else if (strcmp(base, "login") == 0 && req->method == POST) {
-    vector_t params =
-        query_find(&req->query, (char*[]){"username", "password"}, 2, 1);
+	} else if (strcmp(base, "login") == 0 && req->method == POST) {
+		vector_t params =
+				query_find(&req->query, (char*[]){"username", "password"}, 2, 1);
 
-    if (params.length != 2) {
-      respond_error(session, 400, "Username and password not provided");
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 2) {
+			respond_error(session, 400, "Username and password not provided");
+			vector_free(&params);
+			return;
+		}
 
-    char *username = vector_getstr(&params, 0),
-         *password = vector_getstr(&params, 1);
+		char *username = vector_getstr(&params, 0),
+				 *password = vector_getstr(&params, 1);
 
-    filemap_partial_object user_find =
-      filemap_find(&session->ctx->user_by_name, username, strlen(username) + 1);
+		filemap_partial_object user_find =
+			filemap_find(&session->ctx->user_by_name, username, strlen(username) + 1);
 
-    filemap_partial_object user_ref =
-        filemap_deref(&session->ctx->user_id, &user_find);
+		filemap_partial_object user_ref =
+				filemap_deref(&session->ctx->user_id, &user_find);
 
-    filemap_object user = filemap_cpy(&session->ctx->user_fmap, &user_ref);
+		filemap_object user = filemap_cpy(&session->ctx->user_fmap, &user_ref);
 
-    if (!user.exists) {
-      respond_template(session, 200, "login", "Login", 1,
-                       "Username and password do not match");
-      vector_free(&params);
-      return;
-    }
+		if (!user.exists) {
+			respond_template(session, 200, "login", "Login", 1,
+											 "Username and password do not match");
+			vector_free(&params);
+			return;
+		}
 
-    userdata_t* data = (userdata_t*)user.fields[article_path_i];
+		userdata_t* data = (userdata_t*)user.fields[article_path_i];
 
-    EVP_DigestInit_ex(session->ctx->digest_ctx, EVP_sha256(), NULL);
-    EVP_DigestUpdate(session->ctx->digest_ctx, password, strlen(password));
-    EVP_DigestUpdate(session->ctx->digest_ctx, &data->salt, 4);
+		EVP_DigestInit_ex(session->ctx->digest_ctx, EVP_sha256(), NULL);
+		EVP_DigestUpdate(session->ctx->digest_ctx, password, strlen(password));
+		EVP_DigestUpdate(session->ctx->digest_ctx, &data->salt, 4);
 
-    unsigned char password_hash[HASH_LENGTH];
-    EVP_DigestFinal_ex(session->ctx->digest_ctx, password_hash, NULL);
+		unsigned char password_hash[HASH_LENGTH];
+		EVP_DigestFinal_ex(session->ctx->digest_ctx, password_hash, NULL);
 
-    if (memcmp(data->password_hash, password_hash, HASH_LENGTH) != 0) {
-      respond_template(session, 200, "login", "Login", 1,
-                       "Username and password do not match");
-      vector_free(&params);
-      return;
-    }
+		if (memcmp(data->password_hash, password_hash, HASH_LENGTH) != 0) {
+			respond_template(session, 200, "login", "Login", 1,
+											 "Username and password do not match");
+			vector_free(&params);
+			return;
+		}
 		
 		user_session* uses = NULL;
 
 		rwlock_write(session->ctx->user_sessions_by_idx.lock);
 		char* old_ses_key = map_remove_unlocked(&session->ctx->user_sessions_by_idx, &user_ref.index);
 
-    if (old_ses_key) {
+		if (old_ses_key) {
 			uses = map_removeptr(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=old_ses_key});
 		}
 
@@ -1229,260 +1229,260 @@ void route(session_t* session, request* req) {
 		
 		session_auth(session, user_ref);
 		
-    respond_redirect(session, "/account");
-    filemap_object_free(&session->ctx->user_fmap, &user);
-    vector_free(&params);
+		respond_redirect(session, "/account");
+		filemap_object_free(&session->ctx->user_fmap, &user);
+		vector_free(&params);
 
-  } else if (strcmp(base, "account") == 0 && req->method == GET) {
-    char** arg = vector_get(&req->path, 1);
+	} else if (strcmp(base, "account") == 0 && req->method == GET) {
+		char** arg = vector_get(&req->path, 1);
 
-    //one step, no need for lock
+		//one step, no need for lock
 
-    filemap_object user;
-    if (!arg) {
-      if (!session->user_ses) {
-        respond_template(session, 200, "login", "Login", 1,
-                         "You aren't logged in");
-        return;
-      }
+		filemap_object user;
+		if (!arg) {
+			if (!session->user_ses) {
+				respond_template(session, 200, "login", "Login", 1,
+												 "You aren't logged in");
+				return;
+			}
 			
 			user = filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
 
-      respond_template(session, 200, "account", user.fields[user_name_i], 0, "",
-                       user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
+			respond_template(session, 200, "account", user.fields[user_name_i], 0, "",
+											 user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
 
-    } else {
-      user =
-          filemap_findcpy(&session->ctx->user_by_name,
-                          *arg, strlen(*arg) + 1);
+		} else {
+			user =
+					filemap_findcpy(&session->ctx->user_by_name,
+													*arg, strlen(*arg) + 1);
 
-      if (!user.exists) {
-        respond_error(session, 404, "User not found");
-        return;
-      }
+			if (!user.exists) {
+				respond_error(session, 404, "User not found");
+				return;
+			}
 
 			int setperms = (get_perms(session) & perms_admin) && !(((userdata_t*)user.fields[user_data_i])->perms & perms_admin);
-      respond_template(session, 200, "profile", user.fields[user_name_i],
-                       setperms, user.fields[user_name_i], user.fields[user_bio_i]);
-    }
+			respond_template(session, 200, "profile", user.fields[user_name_i],
+											 setperms, user.fields[user_name_i], user.fields[user_bio_i]);
+		}
 
-    filemap_object_free(&session->ctx->user_fmap, &user);
+		filemap_object_free(&session->ctx->user_fmap, &user);
 
-  } else if (strcmp(base, "account") == 0 && req->method == POST) {
-    char** target = vector_get(&req->path, 1);
-    if (target) {
-      if (!(get_perms(session) & perms_admin)) {
-        respond_error(session, 403, "You are not opped in my minecraft server");
-        return;
-      }
+	} else if (strcmp(base, "account") == 0 && req->method == POST) {
+		char** target = vector_get(&req->path, 1);
+		if (target) {
+			if (!(get_perms(session) & perms_admin)) {
+				respond_error(session, 403, "You are not opped in my minecraft server");
+				return;
+			}
 
-      vector_t params = query_find(&req->query, (char*[]){"permissions"}, 1, 1);
+			vector_t params = query_find(&req->query, (char*[]){"permissions"}, 1, 1);
 
-      if (params.length != 1) {
-        respond_error(session, 400, "Permissions missing");
-        vector_free(&params);
-        return;
-      }
+			if (params.length != 1) {
+				respond_error(session, 400, "Permissions missing");
+				vector_free(&params);
+				return;
+			}
 
-      filemap_partial_object name_user =
-        filemap_find(&session->ctx->user_by_name, *target, strlen(*target) + 1);
+			filemap_partial_object name_user =
+				filemap_find(&session->ctx->user_by_name, *target, strlen(*target) + 1);
 
-      if (!name_user.exists) {
-        respond_error(session, 404, "User not found");
-        vector_free(&params);
-        return;
-      }
+			if (!name_user.exists) {
+				respond_error(session, 404, "User not found");
+				vector_free(&params);
+				return;
+			}
 
-      filemap_partial_object list_user = filemap_deref(&session->ctx->user_id, &name_user);
+			filemap_partial_object list_user = filemap_deref(&session->ctx->user_id, &name_user);
 
 			user_session* ses = uses_from_idx(session->ctx, list_user.index);
 
-      filemap_object usee = filemap_cpy(&session->ctx->user_fmap, &list_user);
+			filemap_object usee = filemap_cpy(&session->ctx->user_fmap, &list_user);
 
-      char* perms_str = vector_getstr(&params, 0);
-      uint8_t usee_perms = (uint8_t)strtol(perms_str, NULL, 0);
+			char* perms_str = vector_getstr(&params, 0);
+			uint8_t usee_perms = (uint8_t)strtol(perms_str, NULL, 0);
 
-      userdata_t* data = (userdata_t*)usee.fields[user_data_i];
-      data->perms = usee_perms;
+			userdata_t* data = (userdata_t*)usee.fields[user_data_i];
+			data->perms = usee_perms;
 
-      filemap_object new_u = filemap_push(&session->ctx->user_fmap, usee.fields, usee.lengths);
-      filemap_list_update(&session->ctx->user_id, &list_user, &new_u);
+			filemap_object new_u = filemap_push(&session->ctx->user_fmap, usee.fields, usee.lengths);
+			filemap_list_update(&session->ctx->user_id, &list_user, &new_u);
 
-      if (ses) {
-        ses->user = filemap_partialize(&list_user, &new_u);
-      }
+			if (ses) {
+				ses->user = filemap_partialize(&list_user, &new_u);
+			}
 			
-      filemap_delete_object(&session->ctx->user_fmap, &usee);
+			filemap_delete_object(&session->ctx->user_fmap, &usee);
 
-      respond_template(session, 200, "profile", usee.fields[user_name_i], 1,
-                       usee.fields[user_name_i], usee.fields[user_bio_i]);
+			respond_template(session, 200, "profile", usee.fields[user_name_i], 1,
+											 usee.fields[user_name_i], usee.fields[user_bio_i]);
 
-      filemap_object_free(&session->ctx->user_fmap, &usee);
-      vector_free(&params);
+			filemap_object_free(&session->ctx->user_fmap, &usee);
+			vector_free(&params);
 
-      return;
-    }
+			return;
+		}
 
 
-    filemap_object user =
-        filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
+		filemap_object user =
+				filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
 
-    if (!user.exists) {
-      respond_template(session, 200, "login", "Login", 1,
-                       "You aren't logged in");
-      
-      return;
-    }
+		if (!user.exists) {
+			respond_template(session, 200, "login", "Login", 1,
+											 "You aren't logged in");
+			
+			return;
+		}
 
-    vector_t params =
-        query_find(&req->query, (char*[]){"username", "email", "bio"}, 3, 1);
+		vector_t params =
+				query_find(&req->query, (char*[]){"username", "email", "bio"}, 3, 1);
 
-    if (params.length != 3) {
-      respond_error(session, 400, "Username email and biography not provided");
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 3) {
+			respond_error(session, 400, "Username email and biography not provided");
+			vector_free(&params);
+			return;
+		}
 
-    char *username = vector_getstr(&params, 0),
-         *email = vector_getstr(&params, 1),
-         *bio = vector_getstr(&params, 2);
+		char *username = vector_getstr(&params, 0),
+				 *email = vector_getstr(&params, 1),
+				 *bio = vector_getstr(&params, 2);
 
-    char* err = user_error(username, email);
-    if (err) {
-      respond_template(session, 200, "account", user.fields[user_name_i], 1, err,
-                       user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
-      
-      filemap_object_free(&session->ctx->user_fmap, &user);
-      vector_free(&params);
-      return;
-    }
+		char* err = user_error(username, email);
+		if (err) {
+			respond_template(session, 200, "account", user.fields[user_name_i], 1, err,
+											 user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
+			
+			filemap_object_free(&session->ctx->user_fmap, &user);
+			vector_free(&params);
+			return;
+		}
 
-    int name_change = strcmp(user.fields[user_name_i], username) != 0,
-        email_change = strcmp(user.fields[user_email_i], email) != 0,
-        bio_change = strcmp(user.fields[user_bio_i], bio) != 0;
+		int name_change = strcmp(user.fields[user_name_i], username) != 0,
+				email_change = strcmp(user.fields[user_email_i], email) != 0,
+				bio_change = strcmp(user.fields[user_bio_i], bio) != 0;
 
-    if (!name_change && !email_change && !bio_change) {
-      respond_template(session, 200, "account", user.fields[user_name_i], 0, "",
-                       user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
-      
-      filemap_object_free(&session->ctx->user_fmap, &user);
-      vector_free(&params);
-      return;
-    }
+		if (!name_change && !email_change && !bio_change) {
+			respond_template(session, 200, "account", user.fields[user_name_i], 0, "",
+											 user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
+			
+			filemap_object_free(&session->ctx->user_fmap, &user);
+			vector_free(&params);
+			return;
+		}
 
-    filemap_partial_object name_user =
-        filemap_find(&session->ctx->user_by_name,
-                     username, strlen(username) + 1);
+		filemap_partial_object name_user =
+				filemap_find(&session->ctx->user_by_name,
+										 username, strlen(username) + 1);
 
-    if (name_change && name_user.exists) {
-      respond_template(session, 200, "account", user.fields[user_name_i], 1,
-                       "Username already taken", user.fields[user_name_i], user.fields[user_email_i],
-                       user.fields[user_bio_i]);
+		if (name_change && name_user.exists) {
+			respond_template(session, 200, "account", user.fields[user_name_i], 1,
+											 "Username already taken", user.fields[user_name_i], user.fields[user_email_i],
+											 user.fields[user_bio_i]);
 
-      filemap_object_free(&session->ctx->user_fmap, &user);
-      vector_free(&params);
-      return;
-    }
+			filemap_object_free(&session->ctx->user_fmap, &user);
+			vector_free(&params);
+			return;
+		}
 
-    filemap_partial_object email_user =
-        filemap_find(&session->ctx->user_by_email,
-                     email, strlen(email) + 1);
+		filemap_partial_object email_user =
+				filemap_find(&session->ctx->user_by_email,
+										 email, strlen(email) + 1);
 
-    if (email_change && email_user.exists) {
-      respond_template(session, 200, "account", user.fields[user_name_i], 1,
-                       "Email is already in use", username, email, bio);
-      filemap_object_free(&session->ctx->user_fmap, &user);
-      vector_free(&params);
-      return;
-    }
+		if (email_change && email_user.exists) {
+			respond_template(session, 200, "account", user.fields[user_name_i], 1,
+											 "Email is already in use", username, email, bio);
+			filemap_object_free(&session->ctx->user_fmap, &user);
+			vector_free(&params);
+			return;
+		}
 
-    // delete old indices
-    if (name_change) {
-      filemap_remove(&session->ctx->user_by_name, user.fields[user_name_i], strlen(user.fields[user_name_i]) + 1);
-    }
+		// delete old indices
+		if (name_change) {
+			filemap_remove(&session->ctx->user_by_name, user.fields[user_name_i], strlen(user.fields[user_name_i]) + 1);
+		}
 
-    if (email_change) {
-      filemap_remove(&session->ctx->user_by_email, user.fields[user_email_i], strlen(user.fields[user_email_i]) + 1);
-    }
+		if (email_change) {
+			filemap_remove(&session->ctx->user_by_email, user.fields[user_email_i], strlen(user.fields[user_email_i]) + 1);
+		}
 
-    // insert new user and update (new) indices
-    if (name_change || email_change || bio_change) {
-      filemap_object new = filemap_push(&session->ctx->user_fmap,
+		// insert new user and update (new) indices
+		if (name_change || email_change || bio_change) {
+			filemap_object new = filemap_push(&session->ctx->user_fmap,
 													(char*[]){username, email, user.fields[user_data_i], bio},
-                          (uint64_t[]){strlen(username) + 1, strlen(email) + 1,
-                                       user.lengths[user_data_i], strlen(bio) + 1});
+													(uint64_t[]){strlen(username) + 1, strlen(email) + 1,
+																			 user.lengths[user_data_i], strlen(bio) + 1});
 			
 			filemap_list_update(&session->ctx->user_id, &session->user_ses->user, &new);
 			filemap_delete_object(&session->ctx->user_fmap, &user);
 
-      filemap_object new_ref = filemap_index_obj(&new, &session->user_ses->user);
+			filemap_object new_ref = filemap_index_obj(&new, &session->user_ses->user);
 
-      if (name_change) filemap_insert(&session->ctx->user_by_name, &new_ref);
-      if (email_change) filemap_insert(&session->ctx->user_by_email, &new_ref);
-    }
+			if (name_change) filemap_insert(&session->ctx->user_by_name, &new_ref);
+			if (email_change) filemap_insert(&session->ctx->user_by_email, &new_ref);
+		}
 
-    respond_template(session, 200, "account", username, 1, "Updated profile",
-                     username, email, bio);
-    filemap_object_free(&session->ctx->user_fmap, &user);
-    vector_free(&params);
+		respond_template(session, 200, "account", username, 1, "Updated profile",
+										 username, email, bio);
+		filemap_object_free(&session->ctx->user_fmap, &user);
+		vector_free(&params);
 
 
-  } else if (strcmp(base, "password") == 0 && req->method == POST) {
+	} else if (strcmp(base, "password") == 0 && req->method == POST) {
 
-    filemap_object user =
-        filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
+		filemap_object user =
+				filemap_cpy(&session->ctx->user_fmap, &session->user_ses->user);
 
-    if (!user.exists) {
-      respond_template(session, 200, "login", "Login", 1,
-                       "You aren't logged in");
-      return;
-    }
+		if (!user.exists) {
+			respond_template(session, 200, "login", "Login", 1,
+											 "You aren't logged in");
+			return;
+		}
 
-    vector_t params = query_find(&req->query, (char*[]){"password"}, 1, 1);
+		vector_t params = query_find(&req->query, (char*[]){"password"}, 1, 1);
 
-    if (params.length != 1) {
-      respond_error(session, 400, "Password not provided");
-      filemap_object_free(&session->ctx->user_fmap, &user);
-      
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 1) {
+			respond_error(session, 400, "Password not provided");
+			filemap_object_free(&session->ctx->user_fmap, &user);
+			
+			vector_free(&params);
+			return;
+		}
 
-    char* password = vector_getstr(&params, 0);
-    char* passerr = user_password_error(password);
+		char* password = vector_getstr(&params, 0);
+		char* passerr = user_password_error(password);
 
-    if (passerr) {
-      respond_template(session, 200, "account", user.fields[user_name_i], 1, passerr,
-                       user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
+		if (passerr) {
+			respond_template(session, 200, "account", user.fields[user_name_i], 1, passerr,
+											 user.fields[user_name_i], user.fields[user_email_i], user.fields[user_bio_i]);
 
-      filemap_object_free(&session->ctx->user_fmap, &user);
-      vector_free(&params);
-      return;
-    }
+			filemap_object_free(&session->ctx->user_fmap, &user);
+			vector_free(&params);
+			return;
+		}
 
-    userdata_t* data = (userdata_t*)user.fields[user_data_i];
+		userdata_t* data = (userdata_t*)user.fields[user_data_i];
 
-    EVP_DigestInit_ex(session->ctx->digest_ctx, EVP_sha256(), NULL);
-    EVP_DigestUpdate(session->ctx->digest_ctx, password, strlen(password));
-    EVP_DigestUpdate(session->ctx->digest_ctx, &data->salt, 4);
+		EVP_DigestInit_ex(session->ctx->digest_ctx, EVP_sha256(), NULL);
+		EVP_DigestUpdate(session->ctx->digest_ctx, password, strlen(password));
+		EVP_DigestUpdate(session->ctx->digest_ctx, &data->salt, 4);
 
-    EVP_DigestFinal_ex(session->ctx->digest_ctx, data->password_hash, NULL);
+		EVP_DigestFinal_ex(session->ctx->digest_ctx, data->password_hash, NULL);
 
-    // no length changes, refer to old data and updated userdata_t
-    filemap_set(&session->ctx->user_fmap, &session->user_ses->user,
+		// no length changes, refer to old data and updated userdata_t
+		filemap_set(&session->ctx->user_fmap, &session->user_ses->user,
 			(update_t[]){{.field=user_data_i, .len=sizeof(userdata_t), .new=(char*)data}}, 1);
 
-    respond_template(session, 200, "account", user.fields[user_name_i], 1,
-                     "Changed password successfully", user.fields[user_name_i],
-                     user.fields[user_email_i], user.fields[user_bio_i]);
-    filemap_object_free(&session->ctx->user_fmap, &user);
+		respond_template(session, 200, "account", user.fields[user_name_i], 1,
+										 "Changed password successfully", user.fields[user_name_i],
+										 user.fields[user_email_i], user.fields[user_bio_i]);
+		filemap_object_free(&session->ctx->user_fmap, &user);
 
 
-  } else if (strcmp(base, "logout") == 0) {
+	} else if (strcmp(base, "logout") == 0) {
 
-    if (session->user_ses) {
+		if (session->user_ses) {
 			rwlock_write(session->ctx->user_sessions_by_idx.lock);
-      char* key = map_remove_unlocked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
+			char* key = map_remove_unlocked(&session->ctx->user_sessions_by_idx, &session->user_ses->user.index);
 			
 			if (key)
 				map_remove(&session->ctx->user_sessions, &(map_sized_t){.size=AUTH_KEYSZ, .bin=key});
@@ -1493,44 +1493,44 @@ void route(session_t* session, request* req) {
 				uses_free(session->user_ses);
 				session->user_ses = NULL;
 			}
-    }
+		}
 
-    respond_redirect(session, "/");
+		respond_redirect(session, "/");
 
-  } else if (strcmp(base, "new") == 0 && req->method == GET) {
-    int has_perm = get_perms(session) & perms_create_article;
-    respond_template(session, 200, "new", "New article", has_perm, 0, "", "", "");
+	} else if (strcmp(base, "new") == 0 && req->method == GET) {
+		int has_perm = get_perms(session) & perms_create_article;
+		respond_template(session, 200, "new", "New article", has_perm, 0, "", "", "");
 
-  } else if (strcmp(base, "new") == 0 && req->method == POST) {
-    //lock for consistent contributors
-    
-    if (!(get_perms(session) & perms_create_article)) {
-      respond_template(session, 200, "new", "New article", 0, 0, "", "");
-      return;
-    }
+	} else if (strcmp(base, "new") == 0 && req->method == POST) {
+		//lock for consistent contributors
+		
+		if (!(get_perms(session) & perms_create_article)) {
+			respond_template(session, 200, "new", "New article", 0, 0, "", "");
+			return;
+		}
 
-    vector_t params =
-        query_find(&req->query, (char*[]){"path", "content"}, 2, 1);
+		vector_t params =
+				query_find(&req->query, (char*[]){"path", "content"}, 2, 1);
 
-    if (params.length != 2) {
-      respond_error(session, 400, "Path and content of article not provided");
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 2) {
+			respond_error(session, 400, "Path and content of article not provided");
+			vector_free(&params);
+			return;
+		}
 
-    char* content = vector_getstr(&params, 1);
+		char* content = vector_getstr(&params, 1);
 
-    char* path_str = vector_getstr(&params, 0);
+		char* path_str = vector_getstr(&params, 0);
 
-    vector_t path = vector_new(sizeof(char*));
-    if (!parse_wiki_path(path_str, &path)) {
-      respond_template(session, 200, "new", "New article", 1, 1, "Invalid path",
-                       path_str, content);
+		vector_t path = vector_new(sizeof(char*));
+		if (!parse_wiki_path(path_str, &path)) {
+			respond_template(session, 200, "new", "New article", 1, 1, "Invalid path",
+											 path_str, content);
 
-      vector_free_strings(&path);
-      vector_free(&params);
-      return;
-    }
+			vector_free_strings(&path);
+			vector_free(&params);
+			return;
+		}
 
 		char* html_cache = heapcpystr(content);
 		vector_t refs = vector_new(sizeof(vector_t));
@@ -1585,8 +1585,8 @@ void route(session_t* session, request* req) {
 		update_article_keywords(session->ctx, &keywords, NULL, article.index);
 		article_words_free(&keywords);
 		
-    // display/file path
-    vector_t out_path = make_path(&path);
+		// display/file path
+		vector_t out_path = make_path(&path);
 
 		//add diff
 
@@ -1603,39 +1603,39 @@ void route(session_t* session, request* req) {
 		txt_free(&txt);
 		
 		vector_t url = flatten_url(&path);
-    vector_insertstr(&url, 0, "wiki/");
+		vector_insertstr(&url, 0, "wiki/");
 
 		unlock_article(session->ctx, flattened.data, flattened.length);
 
 		//redirect
-    respond_redirect(session, url.data);
+		respond_redirect(session, url.data);
 
 		drop(html_cache);
-    vector_free_strings(&path);
-    vector_free(&flattened);
-    vector_free(&out_path);
-    vector_free(&params);
-    vector_free(&url);
+		vector_free_strings(&path);
+		vector_free(&flattened);
+		vector_free(&out_path);
+		vector_free(&params);
+		vector_free(&url);
 
 		//very similar to /new but changes for multipart and files
-  } else if (strcmp(base, "upload")==0 && req->method==POST) {
-    
-    if (!(get_perms(session) & perms_create_article)) {
-      respond_template(session, 200, "new", "New article", 0, 0, "", "");
-      return;
-    }
+	} else if (strcmp(base, "upload")==0 && req->method==POST) {
+		
+		if (!(get_perms(session) & perms_create_article)) {
+			respond_template(session, 200, "new", "New article", 0, 0, "", "");
+			return;
+		}
 
 		//search multipart data
-    vector_t params = multipart_find(&req->files, (char*[]){"path", "file"}, 2, 1);
+		vector_t params = multipart_find(&req->files, (char*[]){"path", "file"}, 2, 1);
 
-    if (params.length != 2) {
-      respond_error(session, 400, "Path and file not provided");
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 2) {
+			respond_error(session, 400, "Path and file not provided");
+			vector_free(&params);
+			return;
+		}
 
-    multipart_data* path_mp = vector_get(&params, 0);
-    multipart_data* content = vector_get(&params, 1);
+		multipart_data* path_mp = vector_get(&params, 0);
+		multipart_data* content = vector_get(&params, 1);
 		
 		char* path_str = heapcpy(path_mp->len+1, path_mp->content);
 		path_str[path_mp->len] = 0;
@@ -1646,17 +1646,17 @@ void route(session_t* session, request* req) {
 			return;
 		}
 
-    vector_t path = vector_new(sizeof(char*));
-    if (!parse_wiki_path(path_str, &path)) {
-      respond_template(session, 200, "new", "New article", 1, 1, "Invalid path",
-                       path_str, "");
+		vector_t path = vector_new(sizeof(char*));
+		if (!parse_wiki_path(path_str, &path)) {
+			respond_template(session, 200, "new", "New article", 1, 1, "Invalid path",
+											 path_str, "");
 
 			drop(path_str);
 
-      vector_free_strings(&path);
-      vector_free(&params);
-      return;
-    }
+			vector_free_strings(&path);
+			vector_free(&params);
+			return;
+		}
 
 		vector_t flattened = flatten_path(&path);
 
@@ -1680,7 +1680,7 @@ void route(session_t* session, request* req) {
 		}
 
 		
-    vector_t out_path = make_path(&path);
+		vector_t out_path = make_path(&path);
 
 		FILE* f = fopen(out_path.data, "w");
 		fwrite(content->content, content->len, 1, f);
@@ -1689,17 +1689,17 @@ void route(session_t* session, request* req) {
 		unlock_article(session->ctx, flattened.data, flattened.length);
 
 		vector_t url = flatten_url(&path);
-    vector_insertstr(&url, 0, "wiki/");
+		vector_insertstr(&url, 0, "wiki/");
 
-    respond_redirect(session, url.data);
+		respond_redirect(session, url.data);
 		vector_free(&url);
-    
+		
 		drop(path_str);
 
 		vector_free(&out_path);
-    vector_free_strings(&path);
-    vector_free(&flattened);
-    vector_free(&params);
+		vector_free_strings(&path);
+		vector_free(&flattened);
+		vector_free(&params);
 
 	} else if (strcmp(base, "edit")==0 && req->method==GET) {
 		req_wiki_path(req);
@@ -1736,39 +1736,39 @@ void route(session_t* session, request* req) {
 		drop(data);
 
 	} else if (strcmp(base, "edit")==0 && req->method==POST) {
-    
+		
 		permissions_t perms = get_perms(session);
-    if (!(perms & perms_edit_article)) {
-      respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
-      return;
-    }
+		if (!(perms & perms_edit_article)) {
+			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
+			return;
+		}
 
-    vector_t params =
-        query_find(&req->query, (char*[]){"old-path", "new-path", "content"}, 3, 1);
+		vector_t params =
+				query_find(&req->query, (char*[]){"old-path", "new-path", "content"}, 3, 1);
 
-    if (params.length != 3) {
-      respond_error(session, 400, "Paths and content of article not provided");
-      vector_free(&params);
-      return;
-    }
+		if (params.length != 3) {
+			respond_error(session, 400, "Paths and content of article not provided");
+			vector_free(&params);
+			return;
+		}
 
-    char* path_str = vector_getstr(&params, 0);
-    char* new_path_str = vector_getstr(&params, 1);
+		char* path_str = vector_getstr(&params, 0);
+		char* new_path_str = vector_getstr(&params, 1);
 
-    char* content = vector_getstr(&params, 2);
+		char* content = vector_getstr(&params, 2);
 
-    vector_t path = vector_new(sizeof(char*));
-    vector_t new_path = vector_new(sizeof(char*));
+		vector_t path = vector_new(sizeof(char*));
+		vector_t new_path = vector_new(sizeof(char*));
 
-    if (!parse_wiki_path(path_str, &path) || !parse_wiki_path(new_path_str, &new_path)) {
-      respond_template(session, 200, "edit", "Edit article", 1, 1, "Invalid path",
-                       path_str, new_path_str, content);
+		if (!parse_wiki_path(path_str, &path) || !parse_wiki_path(new_path_str, &new_path)) {
+			respond_template(session, 200, "edit", "Edit article", 1, 1, "Invalid path",
+											 path_str, new_path_str, content);
 
-      vector_free_strings(&new_path);
-      vector_free_strings(&path);
-      vector_free(&params);
-      return;
-    }
+			vector_free_strings(&new_path);
+			vector_free_strings(&path);
+			vector_free(&params);
+			return;
+		}
 
 		vector_t flattened = flatten_path(&path);
 		vector_t new_flattened = flatten_path(&new_path);
@@ -1781,29 +1781,29 @@ void route(session_t* session, request* req) {
 		
 		articledata_t* data = obj.exists ? (articledata_t*)obj.fields[article_data_i] : NULL;
 		if (!obj.exists || data->ty != article_text) {
-      respond_template(session, 200, "edit", "Edit article", 1, 1, "Article does not exist / is not a text",
-                       path_str, new_path_str, content);
+			respond_template(session, 200, "edit", "Edit article", 1, 1, "Article does not exist / is not a text",
+											 path_str, new_path_str, content);
 
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
-      vector_free_strings(&new_path);
-      vector_free_strings(&path);
-      vector_free(&params);
+			vector_free_strings(&new_path);
+			vector_free_strings(&path);
+			vector_free(&params);
 			return;
 		}
 
 		vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
 		
 		if (!(perms & perms_admin) && vector_search(&contribs, &session->user_ses->user.index)==0) {
-      respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
+			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 
 			filemap_object_free(&session->ctx->article_fmap, &obj);
 			unlock_article(session->ctx, flattened.data, flattened.length);
 
-      vector_free_strings(&new_path);
-      vector_free_strings(&path);
-      vector_free(&params);
+			vector_free_strings(&new_path);
+			vector_free_strings(&path);
+			vector_free(&params);
 			return;
 		}
 
@@ -1883,7 +1883,7 @@ void route(session_t* session, request* req) {
 			vector_free(&new_referenced_by);
 
 			article_words_free(&keywords);
-      vector_free_strings(&new_path);
+			vector_free_strings(&new_path);
 			vector_free_strings(&path);
 			vector_free(&params);
 			return;
@@ -2001,7 +2001,7 @@ void route(session_t* session, request* req) {
 		if (path_change)
 			unlock_article(session->ctx, new_flattened.data, new_flattened.length);
 
-    vector_insertstr(&url, 0, "wiki/");
+		vector_insertstr(&url, 0, "wiki/");
 
 		//redirect
 		respond_redirect(session, url.data);
@@ -2016,19 +2016,19 @@ void route(session_t* session, request* req) {
 		if (path_change || content_change)
 			filemap_updated_free(&new_obj);
 		
-    vector_free_strings(&path);
+		vector_free_strings(&path);
 		vector_free_strings(&new_path);
 		
 		vector_free(&new_referenced_by);
 
-    vector_free(&flattened);
+		vector_free(&flattened);
 		vector_free(&wpath);
 		vector_free(&url);
 		
-    if (path_change)
+		if (path_change)
 			vector_free(&new_flattened);
 		
-    vector_free(&params);
+		vector_free(&params);
 		
 	//nearly identical
 	} else if (strcmp(base, "setcontrib")==0 && req->method == POST) {
@@ -2277,49 +2277,49 @@ void route(session_t* session, request* req) {
 		filemap_object obj;
 		if (!route_article(session, req, &obj)) return;
 
-    articledata_t* data = (articledata_t*)obj.fields[article_data_i];
-    vector_t path = vector_from_strings(obj.fields[article_path_i], data->path_length);
+		articledata_t* data = (articledata_t*)obj.fields[article_data_i];
+		vector_t path = vector_from_strings(obj.fields[article_path_i], data->path_length);
 
 		char* title = vector_getstr(&path, path.length-1);
 		if (!title) title = "root";
 
-    vector_t path_arg = vector_new(sizeof(template_args));
-    
-    vector_t urls = vector_new(sizeof(char*));
-    vector_expand_strings(&path, &urls, "/wiki/", "/", "");
+		vector_t path_arg = vector_new(sizeof(template_args));
+		
+		vector_t urls = vector_new(sizeof(char*));
+		vector_expand_strings(&path, &urls, "/wiki/", "/", "");
 
-    vector_iterator iter = vector_iterate(&path);
-    while (vector_next(&iter)) {
-      char** sub_args = heap(sizeof(char*[2]));
+		vector_iterator iter = vector_iterate(&path);
+		while (vector_next(&iter)) {
+			char** sub_args = heap(sizeof(char*[2]));
 
-      sub_args[0] = vector_getstr(&urls, iter.i-1);
-      sub_args[1] = *(char**)iter.x;
-      
-      vector_pushcpy(&path_arg, &(template_args){.sub_args=sub_args});
-    }
+			sub_args[0] = vector_getstr(&urls, iter.i-1);
+			sub_args[1] = *(char**)iter.x;
+			
+			vector_pushcpy(&path_arg, &(template_args){.sub_args=sub_args});
+		}
 
-    switch (data->ty) {
+		switch (data->ty) {
 			case article_img:
-      case article_text: {
-        vector_t contribs = {.data = obj.fields[article_contrib_i],
-          .size = sizeof(uint64_t),
-          .length = data->contributors};
+			case article_text: {
+				vector_t contribs = {.data = obj.fields[article_contrib_i],
+					.size = sizeof(uint64_t),
+					.length = data->contributors};
 
 				int is_contrib =
 					session->user_ses ? vector_search(&contribs, &session->user_ses->user.index)>0 : 0;
-        
-        vector_t contribs_arg = vector_new(sizeof(template_args));
-        vector_t contribs_strs = vector_new(sizeof(char*));
+				
+				vector_t contribs_arg = vector_new(sizeof(template_args));
+				vector_t contribs_strs = vector_new(sizeof(char*));
 
-        vector_iterator iter = vector_iterate(&contribs);
-        while (vector_next(&iter)) {
-          filemap_partial_object list_user = filemap_get_idx(&session->ctx->user_id, *(uint64_t*)iter.x);
-          if (!list_user.exists) continue;
+				vector_iterator iter = vector_iterate(&contribs);
+				while (vector_next(&iter)) {
+					filemap_partial_object list_user = filemap_get_idx(&session->ctx->user_id, *(uint64_t*)iter.x);
+					if (!list_user.exists) continue;
 
-          filemap_field uname = filemap_cpyfield(&session->ctx->user_fmap, &list_user, user_name_i);
-          vector_pushcpy(&contribs_arg, &(template_args){.sub_args=heapcpy(sizeof(char**), &uname.val.data)});
-          vector_pushcpy(&contribs_strs, &uname.val.data);
-        }
+					filemap_field uname = filemap_cpyfield(&session->ctx->user_fmap, &list_user, user_name_i);
+					vector_pushcpy(&contribs_arg, &(template_args){.sub_args=heapcpy(sizeof(char**), &uname.val.data)});
+					vector_pushcpy(&contribs_strs, &uname.val.data);
+				}
 
 				permissions_t perms = get_perms(session);
 
@@ -2339,41 +2339,41 @@ void route(session_t* session, request* req) {
 				}
 
 				vector_free(&url);
-        vector_free_strings(&contribs_strs);
+				vector_free_strings(&contribs_strs);
 
-        break;
-      }
+				break;
+			}
 
-      case article_group: {
-        vector_t item_strs = vector_new(sizeof(char*));
-        vector_t items_arg = article_group_list(session->ctx, &obj, data, &item_strs);
+			case article_group: {
+				vector_t item_strs = vector_new(sizeof(char*));
+				vector_t items_arg = article_group_list(session->ctx, &obj, data, &item_strs);
 
-        respond_template(session, 200, "article", title, 0,0,0,0, &path_arg, &items_arg, title, NULL, NULL);
-        vector_free_strings(&item_strs);
-        break;
-      }
+				respond_template(session, 200, "article", title, 0,0,0,0, &path_arg, &items_arg, title, NULL, NULL);
+				vector_free_strings(&item_strs);
+				break;
+			}
 
-      default: {
+			default: {
 				 //????
 				respond_error(session, 422, "Cannot be displayed");
 			}
-    }
+		}
 
-    filemap_object_free(&session->ctx->article_fmap, &obj);
+		filemap_object_free(&session->ctx->article_fmap, &obj);
 
-    vector_free(&path); //references obj
-    vector_free_strings(&urls);
+		vector_free(&path); //references obj
+		vector_free_strings(&urls);
 
 	} else if (strcmp(base, "wikisrc")==0) {
 		filemap_object obj;
 		if (!route_article(session, req, &obj)) return;
 
-    articledata_t* data = (articledata_t*)obj.fields[article_data_i];
-    vector_t path = vector_from_strings(obj.fields[article_path_i], data->path_length);
+		articledata_t* data = (articledata_t*)obj.fields[article_data_i];
+		vector_t path = vector_from_strings(obj.fields[article_path_i], data->path_length);
 
 		vector_t wpath = flatten_wikipath(&path);
 
-    switch (data->ty) {
+		switch (data->ty) {
 			case article_img: {
 				cached* cache = ctx_fopen(session->ctx, wpath.data);
 
@@ -2383,21 +2383,21 @@ void route(session_t* session, request* req) {
 
 				break;
 			}
-      case article_text: {
+			case article_text: {
 				cached* current = article_current(session->ctx, &wpath);
 				respond(session, 200, current->data, current->len, &(char*[2]){"Content-Type", "text/plain"}, 1);
 				ctx_cache_done(session->ctx, current, wpath.data);
 				break;
-      }
+			}
 
-      default: {
+			default: {
 				respond_error(session, 422, "");
 			}
-    }
+		}
 
-    filemap_object_free(&session->ctx->article_fmap, &obj);
+		filemap_object_free(&session->ctx->article_fmap, &obj);
 		vector_free(&wpath);
-    vector_free(&path);
+		vector_free(&path);
 	
 	} else if (strcmp(base, "users")==0) {
 		
@@ -2438,15 +2438,15 @@ void route(session_t* session, request* req) {
 		}
 
 	} else {
-    resource* res = map_find(&session->ctx->resources,
-                             vector_get(&req->path, req->path.length - 1));
+		resource* res = map_find(&session->ctx->resources,
+														 vector_get(&req->path, req->path.length - 1));
 
-    if (!res) {
-      respond_error(session, 404, "Page not found");
-      return;
-    }
+		if (!res) {
+			respond_error(session, 404, "Page not found");
+			return;
+		}
 
-    respond(session, 200, res->content, res->len,
-            &(char*[2]){"Content-Type", res->mime}, 1);
-  }
+		respond(session, 200, res->content, res->len,
+						&(char*[2]){"Content-Type", res->mime}, 1);
+	}
 }
