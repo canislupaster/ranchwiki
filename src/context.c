@@ -30,6 +30,8 @@ const char* GLOBAL_TEMPLATE = "global"; //name of global template
 #define WORD_LOCKS 32
 #define QUERY_MAX 32
 
+#define SECRET_PATH "secret"
+
 typedef enum {GET, POST} method_t;
 
 typedef enum {url_formdata, multipart_formdata} content_type;
@@ -177,15 +179,19 @@ void uses_free(user_session* uses) {
 	drop(uses);
 }
 
-user_session* uses_from_idx(ctx_t* ctx, uint64_t idx) {
-	char* ses_key = map_find(&ctx->user_sessions_by_idx, &idx);
-	user_session* ses=NULL;
+user_session* uses_from_idx(ctx_t* ctx, uint64_t idx, char write) {
+	if (write) rwlock_write(ctx->user_sessions_by_idx.lock);
+	else rwlock_read(ctx->user_sessions_by_idx.lock);
+	
+	char* ses_key = map_find_unlocked(&ctx->user_sessions_by_idx, &idx);
+	
+	if (!write) rwlock_unread(ctx->user_sessions_by_idx.lock);
 	
 	if (ses_key) {
-		ses = *(user_session**)map_find(&ctx->user_sessions, &(map_sized_t){.bin=ses_key, .size=AUTH_KEYSZ});
+		return *(user_session**)map_find(&ctx->user_sessions, &(map_sized_t){.bin=ses_key, .size=AUTH_KEYSZ});
+	} else {
+		return NULL;
 	}
-	
-	return ses;
 }
 
 void cleanup_sessions(ctx_t* ctx) {
@@ -328,13 +334,11 @@ void unlock_article(ctx_t* ctx, char* path, unsigned long sz) {
 	}
 }
 
-typedef enum __attribute__((__packed__)) {
-	perms_none = 0x0,
-	perms_create_article = 0x1,
-	perms_edit_article = 0x2,
-	perms_delete_article = 0x4,
-	perms_admin = 0x8
-} permissions_t;
+#define PERMS_CREATE 1
+#define PERMS_EDIT 2
+#define PERMS_DELETE 3
+#define PERMS_ADMIN 4
+#define PERMS_SECRET 5
 
 #define HASH_LENGTH 32 //256 bit SHA
 #define MIN_USERNAME 1
@@ -345,7 +349,7 @@ typedef struct __attribute__((__packed__)) {
 	unsigned char password_hash[HASH_LENGTH];
 	int32_t salt;
 
-	permissions_t perms;
+	unsigned char perms;
 } userdata_t;
 
 typedef filemap_object filemap_object;
@@ -372,6 +376,38 @@ char* user_error(char* username, char* email) {
 	}
 
 	return NULL;
+}
+
+int setrank(ctx_t* ctx, filemap_partial_object* list_user, filemap_object* user, unsigned char maxperm, unsigned char setperm) {
+	user_session* ses = uses_from_idx(ctx, list_user->index, 1);
+	if (ses) mtx_lock(&ses->lock);
+
+	*user = filemap_cpy(&ctx->user_fmap, list_user);
+
+	userdata_t* data = (userdata_t*)user->fields[user_data_i];
+	
+	if (data->perms >= maxperm) {
+		rwlock_unwrite(ctx->user_sessions_by_idx.lock);
+		if (ses) mtx_unlock(&ses->lock);
+		filemap_object_free(&ctx->user_fmap, user);
+		
+		return 0;
+	}
+	
+	data->perms = setperm;
+
+	filemap_object new_u = filemap_push(&ctx->user_fmap, user->fields, user->lengths);
+	filemap_list_update(&ctx->user_id, list_user, &new_u);
+	filemap_delete_object(&ctx->user_fmap, user);
+
+	if (ses) {
+		ses->user = filemap_partialize(list_user, &new_u);
+		mtx_unlock(&ses->lock);
+	}
+	
+	rwlock_unwrite(ctx->user_sessions_by_idx.lock);
+
+	return 1;
 }
 
 typedef enum __attribute__((__packed__)) {

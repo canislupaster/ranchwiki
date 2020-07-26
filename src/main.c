@@ -100,24 +100,22 @@ int util_main(void* udata) {
 
 			filemap_partial_object list_user = filemap_deref(&ctx->user_id, &name_user_ref);
 
-			filemap_object user = filemap_cpy(&ctx->user_fmap, &list_user);
-
-			userdata_t* data = (userdata_t*)user.fields[user_data_i];
-			data->perms = (char)strtol(vector_getstr(&arg, 2), NULL, 0);
-			
-			user_session* ses = uses_from_idx(ctx, list_user.index);
-			if (ses) mtx_lock(&ses->lock);
-
-			filemap_object new_u = filemap_push(&ctx->user_fmap, user.fields, user.lengths);
-			filemap_list_update(&ctx->user_id, &list_user, &new_u);
-			filemap_delete_object(&ctx->user_fmap, &user);
-
-			if (ses) {
-				ses->user = filemap_partialize(&list_user, &new_u);
-				mtx_unlock(&ses->lock);
-			}
-
+			filemap_object user;
+			setrank(ctx, &list_user, &user, UCHAR_MAX, (unsigned char)strtoul(vector_getstr(&arg, 2), NULL, 10));
 			filemap_object_free(&ctx->user_fmap, &user);
+			
+			printf("Permissions updated\n");
+			
+		} else if (strcmp(vector_getstr(&arg, 0), "rankall")==0 && arg.length == 2) {
+			unsigned char setperm = (unsigned char)strtoul(vector_getstr(&arg, 1), NULL, 10);
+			filemap_iterator iter = filemap_list_iterate(&ctx->user_id);
+			
+			while (filemap_next(&iter)) {
+				filemap_object user;
+				setrank(ctx, &iter.obj, &user, UCHAR_MAX, setperm);
+				filemap_object_free(&ctx->user_fmap, &user);
+			}
+			
 			printf("Permissions updated\n");
 			
 		} else if (strcmp(vector_getstr(&arg, 0), "diff")==0 && arg.length==3) {

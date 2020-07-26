@@ -8,26 +8,26 @@
 #include "hashtable.h"
 #define DATA_PATH "./data/"
 typedef struct {
-  uint64_t pos;
-  char* txt;
+	uint64_t pos;
+	char* txt;
 } add_t;
 typedef struct {
-  uint64_t pos;
+	uint64_t pos;
 	char* txt;
 } del_t;
 typedef struct {
-  vector_t additions;
-  vector_t deletions;
+	vector_t additions;
+	vector_t deletions;
 	uint64_t author;
 	uint64_t time;
 	
 	uint64_t prev; //only returned, otherwise garbage
 } diff_t;
 typedef struct {
-  FILE* file;
+	FILE* file;
 
-  char* current;
-  vector_t diffs;
+	char* current;
+	vector_t diffs;
 } text_t;
 int parse_wiki_path(char* path, vector_t* vec);
 diff_t find_changes(char* from, char* to);

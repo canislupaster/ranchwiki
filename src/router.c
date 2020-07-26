@@ -19,13 +19,13 @@
 
 //:)
 
-permissions_t get_perms(session_t* session) {
-	if (!session->user_ses) return perms_none;
+unsigned char get_perms(session_t* session) {
+	if (!session->user_ses) return 0;
 
 	filemap_field udata =
 			filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_data_i);
 
-	permissions_t perms = ((userdata_t*)udata.val.data)->perms;
+	unsigned char perms = ((userdata_t*)udata.val.data)->perms;
 	vector_free(&udata.val);
 	return perms;
 }
@@ -715,11 +715,13 @@ int article_lock_groups(ctx_t* ctx, vector_t* path, vector_t* flattened, vector_
 	vector_iterator iter = vector_iterate_rev(path);
 
 	unsigned long key_len = flattened->length;
+	int secret = strcmp(vector_getstr(path, 0), SECRET_PATH)==0;
 
 	while (vector_next(&iter)) {
 		unsigned long segment_len = strlen(*(char**)iter.x);
 
 		key_len -= segment_len + 1;	//\0 is a delimeter
+		if (key_len == 0 && secret) break; //dont insert /secret into / :)
 
 		lock_article(ctx, flattened->data, key_len);
 
@@ -996,13 +998,18 @@ void req_wiki_path(request* req) {
 
 int route_article(session_t* session, request* req, filemap_object* obj) {
 	req_wiki_path(req);
-	vector_t flattened = flatten_path(&req->path);
 	
 	filemap_partial_object article_ref;
-	if (*flattened.data == 0) { //get top
+	if (req->path.length == 0) { //get top
 		article_ref = filemap_find(&session->ctx->article_by_name, NULL, 0);
+	} else if (get_perms(session) < PERMS_SECRET
+						&& req->path.length == 1 && strcmp(vector_getstr(&req->path, 0), SECRET_PATH)==0) {
+		respond_error(session, 403, "you shouldnt have come");
+		return 0;
 	} else {
+		vector_t flattened = flatten_path(&req->path);
 		article_ref = filemap_find(&session->ctx->article_by_name, flattened.data, flattened.length);
+		vector_free(&flattened);
 	}
 
 	*obj = filemap_cpyref(&session->ctx->article_fmap, &article_ref);
@@ -1012,7 +1019,7 @@ int route_article(session_t* session, request* req, filemap_object* obj) {
 
 		vector_t path_formatted = flatten_url(&req->path);
 
-		int has_perm = get_perms(session) & perms_create_article;
+		int has_perm = get_perms(session) >= PERMS_CREATE;
 		if (has_perm) {
 			respond_template(session, 200, "new", "New article", 1, 1,
 					"Article does not exist", path_formatted.data, "");
@@ -1022,7 +1029,6 @@ int route_article(session_t* session, request* req, filemap_object* obj) {
 			drop(err);
 		}
 
-		vector_free(&flattened);
 		vector_free(&path_formatted);
 
 		if (obj->exists) {
@@ -1030,10 +1036,9 @@ int route_article(session_t* session, request* req, filemap_object* obj) {
 		}
 
 		return 0;
+	} else {
+		return 1;
 	}
-
-	vector_free(&flattened);
-	return 1;
 }
 
 void session_auth(session_t* session, filemap_partial_object idx) {
@@ -1081,7 +1086,7 @@ void route(session_t* session, request* req) {
 
 		if (session->user_ses) {
 			filemap_field uname = filemap_cpyfield(&session->ctx->user_fmap, &session->user_ses->user, user_name_i);
-			respond_template(session, 200, "home", "ranch", 1, get_perms(session) & perms_create_article, &items_arg, uname.val.data);
+			respond_template(session, 200, "home", "ranch", 1, get_perms(session) >= PERMS_CREATE, &items_arg, uname.val.data);
 
 			vector_free(&uname.val);
 		} else {
@@ -1141,7 +1146,7 @@ void route(session_t* session, request* req) {
 		}
 
 		userdata_t data;
-		data.perms = perms_none;
+		data.perms = 0;
 
 		RAND_bytes((unsigned char*)&data.salt, 4);
 		// lmao
@@ -1261,7 +1266,7 @@ void route(session_t* session, request* req) {
 				return;
 			}
 
-			int setperms = (get_perms(session) & perms_admin) && !(((userdata_t*)user.fields[user_data_i])->perms & perms_admin);
+			int setperms = get_perms(session) >= PERMS_ADMIN && ((userdata_t*)user.fields[user_data_i])->perms < PERMS_ADMIN;
 			respond_template(session, 200, "profile", user.fields[user_name_i],
 											 setperms, user.fields[user_name_i], user.fields[user_bio_i]);
 		}
@@ -1271,7 +1276,7 @@ void route(session_t* session, request* req) {
 	} else if (strcmp(base, "account") == 0 && req->method == POST) {
 		char** target = vector_get(&req->path, 1);
 		if (target) {
-			if (!(get_perms(session) & perms_admin)) {
+			if (get_perms(session) < PERMS_ADMIN) {
 				respond_error(session, 403, "You are not opped in my minecraft server");
 				return;
 			}
@@ -1294,29 +1299,24 @@ void route(session_t* session, request* req) {
 			}
 
 			filemap_partial_object list_user = filemap_deref(&session->ctx->user_id, &name_user);
-
-			user_session* ses = uses_from_idx(session->ctx, list_user.index);
-
-			filemap_object usee = filemap_cpy(&session->ctx->user_fmap, &list_user);
-
-			char* perms_str = vector_getstr(&params, 0);
-			uint8_t usee_perms = (uint8_t)strtol(perms_str, NULL, 0);
-
-			userdata_t* data = (userdata_t*)usee.fields[user_data_i];
-			data->perms = usee_perms;
-
-			filemap_object new_u = filemap_push(&session->ctx->user_fmap, usee.fields, usee.lengths);
-			filemap_list_update(&session->ctx->user_id, &list_user, &new_u);
-
-			if (ses) {
-				ses->user = filemap_partialize(&list_user, &new_u);
+			
+			if (list_user.index == session->user_ses->user.index) {
+				respond_error(session, 403, "You cannot set your own permissions.");
+				vector_free(&params);
+				return;
 			}
 			
-			filemap_delete_object(&session->ctx->user_fmap, &usee);
-
+			unsigned char usee_perms = (unsigned char)strtol(vector_getstr(&params, 0), NULL, 0);
+			
+			filemap_object usee;
+			if (!setrank(session->ctx, &list_user, &usee, PERMS_ADMIN, usee_perms)) {
+				respond_error(session, 403, "You cannot set an admin's permissions.");
+				vector_free(&params);
+				return;
+			}
+			
 			respond_template(session, 200, "profile", usee.fields[user_name_i], 1,
 											 usee.fields[user_name_i], usee.fields[user_bio_i]);
-
 			filemap_object_free(&session->ctx->user_fmap, &usee);
 			vector_free(&params);
 
@@ -1498,13 +1498,13 @@ void route(session_t* session, request* req) {
 		respond_redirect(session, "/");
 
 	} else if (strcmp(base, "new") == 0 && req->method == GET) {
-		int has_perm = get_perms(session) & perms_create_article;
+		int has_perm = get_perms(session) >= PERMS_CREATE;
 		respond_template(session, 200, "new", "New article", has_perm, 0, "", "", "");
 
 	} else if (strcmp(base, "new") == 0 && req->method == POST) {
 		//lock for consistent contributors
 		
-		if (!(get_perms(session) & perms_create_article)) {
+		if (get_perms(session) < PERMS_CREATE) {
 			respond_template(session, 200, "new", "New article", 0, 0, "", "");
 			return;
 		}
@@ -1620,7 +1620,7 @@ void route(session_t* session, request* req) {
 		//very similar to /new but changes for multipart and files
 	} else if (strcmp(base, "upload")==0 && req->method==POST) {
 		
-		if (!(get_perms(session) & perms_create_article)) {
+		if (get_perms(session) < PERMS_CREATE) {
 			respond_template(session, 200, "new", "New article", 0, 0, "", "");
 			return;
 		}
@@ -1737,8 +1737,8 @@ void route(session_t* session, request* req) {
 
 	} else if (strcmp(base, "edit")==0 && req->method==POST) {
 		
-		permissions_t perms = get_perms(session);
-		if (!(perms & perms_edit_article)) {
+		unsigned char perms = get_perms(session);
+		if (perms < PERMS_EDIT) {
 			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 			return;
 		}
@@ -1795,7 +1795,7 @@ void route(session_t* session, request* req) {
 
 		vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
 		
-		if (!(perms & perms_admin) && vector_search(&contribs, &session->user_ses->user.index)==0) {
+		if (perms < PERMS_ADMIN && vector_search(&contribs, &session->user_ses->user.index)==0) {
 			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 
 			filemap_object_free(&session->ctx->article_fmap, &obj);
@@ -2033,9 +2033,9 @@ void route(session_t* session, request* req) {
 	//nearly identical
 	} else if (strcmp(base, "setcontrib")==0 && req->method == POST) {
 
-		permissions_t perms = get_perms(session);
+		unsigned char perms = get_perms(session);
 
-		if (!(perms & perms_edit_article)) {
+		if (perms < PERMS_EDIT) {
 			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 			return;
 		}
@@ -2101,7 +2101,7 @@ void route(session_t* session, request* req) {
 
 		vector_t contribs = {.data = obj.fields[article_contrib_i], .size = 8, .length = data->contributors};
 
-		if (!(perms & perms_admin) && vector_search(&contribs, &session->user_ses->user.index)==0) {
+		if (perms < PERMS_ADMIN && vector_search(&contribs, &session->user_ses->user.index)==0) {
 			respond_template(session, 200, "edit", "Edit article", 0, 0, "", "", "", "");
 			ctx_cache_done(session->ctx, cache, wikipath.data);
 
@@ -2167,8 +2167,8 @@ void route(session_t* session, request* req) {
 		vector_free(&flattened);
 
 	} else if (strcmp(base, "delete")==0 && req->method==POST) {
-		if (!(get_perms(session) & perms_delete_article)) {
-			respond_error(session, 500, "You can't delete stuff");
+		if (get_perms(session) < PERMS_DELETE) {
+			respond_error(session, 500, "Don't grief");
 			return;
 		}
 
@@ -2321,20 +2321,20 @@ void route(session_t* session, request* req) {
 					vector_pushcpy(&contribs_strs, &uname.val.data);
 				}
 
-				permissions_t perms = get_perms(session);
+				unsigned char perms = get_perms(session);
 
 				vector_t url = flatten_url(&path);
 
 				if (data->ty == article_img) {
 					respond_template(session, 200, "article", title, 1, 1,
 							0, //cannot edit image
-							is_contrib && (perms & perms_delete_article),
+							is_contrib && (perms >= PERMS_DELETE),
 							&path_arg, &contribs_arg, title, NULL, url.data);
 
 				} else {
 					respond_template(session, 200, "article", title, 1, 0,
-							is_contrib && (perms & perms_edit_article),
-							is_contrib && (perms & perms_delete_article),
+							is_contrib && (perms >= PERMS_EDIT),
+							is_contrib && (perms >= PERMS_DELETE),
 							&path_arg, &contribs_arg, title, obj.fields[article_html_i], url.data);
 				}
 

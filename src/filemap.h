@@ -126,6 +126,7 @@ void filemap_list_update(filemap_list_t* list, filemap_partial_object* partial, 
 filemap_iterator filemap_list_iterate(filemap_list_t* list);
 uint64_t filemap_list_pos(uint64_t idx);
 uint64_t filemap_list_idx(uint64_t pos);
+int filemap_next(filemap_iterator* iter);
 vector_t filemap_readmany(filemap_iterator* iter, int* more, unsigned max);
 filemap_object filemap_push(filemap_t* filemap, char** fields, uint64_t* lengths);
 typedef struct {

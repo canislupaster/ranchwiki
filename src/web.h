@@ -28,13 +28,13 @@ typedef struct {
 	unsigned long skip; //if a condition, length, including !%
 	unsigned long max_args; //required arguments
 	unsigned long max_cond;
-  unsigned long max_loop;
+	unsigned long max_loop;
 	vector_t substitutions;
 } template_t;
 typedef struct {
-  int* cond_args;
-  vector_t** loop_args;
-  char** sub_args;
+	int* cond_args;
+	vector_t** loop_args;
+	char** sub_args;
 } template_args;
 template_t template_new(char* data);
 void respond_template(session_t* session, int stat, char* template_name, char* title, ...);
