@@ -390,8 +390,10 @@ void filemap_resize(filemap_index_t* index) {
 				mtx_unlock(&index->data->lock);
 
 				hash = do_hash(index, field, f_size);
-
- 				if (hash % (index->slots * 2) == index->slots+i) { //might not have same hash
+				if (hash % index->slots != i) continue;
+				
+				uint64_t slots = (index->slots + (i/index->slots)*index->slots) * 2;
+ 				if (probes>0 || hash % slots != i) {
 					// seek back to pos, set to zero (since we are moving item)
 					fseek(index->file, slot_pos, SEEK_SET);
 
@@ -406,7 +408,7 @@ void filemap_resize(filemap_index_t* index) {
 						uint64_t slot =
 								hash + (uint64_t)((new_probes + new_probes * new_probes) / 2);
 
-						slot %= index->slots * 2;
+						slot %= slots;
 
 						// add more lookup slots for probing
 						// these are only for already-resized slots
